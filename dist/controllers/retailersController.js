@@ -113,7 +113,8 @@ const getRetailers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const retailerIdsFromRequests = new Set(approvedRequests.map(req => req.retailer.id));
         // Format retailers from LinkRequest
         const retailersFromRequests = yield Promise.all(approvedRequests.map((req) => __awaiter(void 0, void 0, void 0, function* () {
-            return (Object.assign(Object.assign({}, req.retailer), { totalOrders: req.retailer.orders.length, totalRevenue: req.retailer.orders.reduce((sum, o) => sum + o.totalAmount, 0), creditPaid: yield prisma_1.default.walletTransaction.aggregate({
+            var _a;
+            return (Object.assign(Object.assign({}, req.retailer), { status: ((_a = req.retailer.user) === null || _a === void 0 ? void 0 : _a.isActive) ? 'active' : 'blocked', totalOrders: req.retailer.orders.length, totalRevenue: req.retailer.orders.reduce((sum, o) => sum + o.totalAmount, 0), creditPaid: yield prisma_1.default.walletTransaction.aggregate({
                     where: {
                         retailerId: req.retailer.id,
                         type: 'credit_repayment',
@@ -126,7 +127,8 @@ const getRetailers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const retailersFromDirect = yield Promise.all(directlyLinkedRetailers
             .filter(r => !retailerIdsFromRequests.has(r.id))
             .map((r) => __awaiter(void 0, void 0, void 0, function* () {
-            return (Object.assign(Object.assign({}, r), { totalOrders: r.orders.length, totalRevenue: r.orders.reduce((sum, o) => sum + o.totalAmount, 0), creditPaid: yield prisma_1.default.walletTransaction.aggregate({
+            var _a;
+            return (Object.assign(Object.assign({}, r), { status: ((_a = r.user) === null || _a === void 0 ? void 0 : _a.isActive) ? 'active' : 'blocked', totalOrders: r.orders.length, totalRevenue: r.orders.reduce((sum, o) => sum + o.totalAmount, 0), creditPaid: yield prisma_1.default.walletTransaction.aggregate({
                     where: {
                         retailerId: r.id,
                         type: 'credit_repayment',
@@ -496,7 +498,6 @@ const approveCreditRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
             yield tx.retailerCredit.upsert({
                 where: { retailerId: creditRequest.retailerId },
                 update: {
-                    creditLimit: { increment: creditRequest.amount },
                     availableCredit: { increment: creditRequest.amount }
                 },
                 create: {
@@ -640,14 +641,10 @@ const updateRetailerCreditLimit = (req, res) => __awaiter(void 0, void 0, void 0
         });
         let credit;
         if (existingCredit) {
-            // Calculate the difference and update available credit
-            const limitDifference = newLimit - existingCredit.creditLimit;
-            const newAvailableCredit = existingCredit.availableCredit + limitDifference;
             credit = yield prisma_1.default.retailerCredit.update({
                 where: { retailerId: Number(id) },
                 data: {
-                    creditLimit: newLimit,
-                    availableCredit: newAvailableCredit
+                    creditLimit: newLimit
                 }
             });
         }

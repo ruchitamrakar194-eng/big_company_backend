@@ -133,12 +133,12 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             },
             include: { product: true }
         });
-        // Calculate profit wallet (realized profit from delivered orders)
-        const deliveredOrderItems = orderItems.filter(item => {
+        // Calculate profit wallet (realized profit from confirmed sales/revenue)
+        const confirmedOrderItems = orderItems.filter(item => {
             const order = allOrders.find(o => o.id === item.orderId);
-            return order && order.status === 'delivered';
+            return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
         });
-        const profitWallet = deliveredOrderItems.reduce((sum, item) => sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0);
+        const profitWallet = confirmedOrderItems.reduce((sum, item) => sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0);
         // Calculate top products
         const productStatsMap = {};
         orderItems.forEach(item => {
@@ -293,13 +293,29 @@ const getInventoryStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const stockProfitMargin = stockValueWholesaler - stockValueSupplier;
         const lowStockCount = products.filter(p => p.lowStockThreshold && p.stock > 0 && p.stock <= p.lowStockThreshold).length;
         const outOfStockCount = products.filter(p => p.stock === 0).length;
+        // Calculate realized profit (profit wallet) from confirmed sales/revenue
+        const orders = yield prisma_1.default.order.findMany({
+            where: { wholesalerId: wholesalerProfile.id }
+        });
+        const orderItems = yield prisma_1.default.orderItem.findMany({
+            where: {
+                order: { wholesalerId: wholesalerProfile.id }
+            },
+            include: { product: true }
+        });
+        const confirmedOrderItems = orderItems.filter(item => {
+            const order = orders.find(o => o.id === item.orderId);
+            return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
+        });
+        const realizedProfit = confirmedOrderItems.reduce((sum, item) => sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0);
         res.json({
             totalProducts,
             stockValueSupplier,
             stockValueWholesaler,
             stockProfitMargin,
             lowStockCount,
-            outOfStockCount
+            outOfStockCount,
+            realizedProfit
         });
     }
     catch (error) {

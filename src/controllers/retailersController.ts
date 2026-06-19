@@ -505,7 +505,6 @@ export const approveCreditRequest = async (req: AuthRequest, res: Response) => {
             await tx.retailerCredit.upsert({
                 where: { retailerId: creditRequest.retailerId },
                 update: {
-                    creditLimit: { increment: creditRequest.amount },
                     availableCredit: { increment: creditRequest.amount }
                 },
                 create: {

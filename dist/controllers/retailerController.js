@@ -1821,6 +1821,15 @@ const requestCredit = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!amount || amount <= 0) {
             return res.status(400).json({ error: 'Invalid amount' });
         }
+        // Check if there is an active outstanding loan
+        const credit = yield prisma_1.default.retailerCredit.findUnique({
+            where: { retailerId: retailerProfile.id }
+        });
+        if (credit && credit.usedCredit > 0) {
+            return res.status(400).json({
+                error: 'You have an active outstanding loan. You must repay your current loan in full before requesting a new one.'
+            });
+        }
         // Create CreditRequest
         const creditRequest = yield prisma_1.default.creditRequest.create({
             data: {
@@ -2157,14 +2166,14 @@ const updateProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         const { name, // User name (Contact Person)
         shop_name, company_name, // Frontend sends this
-        address, tin_number, email } = req.body;
+        address, tin_number, email, phone } = req.body;
         // Use company_name if shop_name is not provided
         const shopNameUpdate = shop_name || company_name;
         // Update User model if needed
-        if (name || email) {
+        if (name || email || phone) {
             yield prisma_1.default.user.update({
                 where: { id: userId },
-                data: Object.assign(Object.assign({}, (name && { name })), (email && { email }))
+                data: Object.assign(Object.assign(Object.assign({}, (name && { name })), (email && { email })), (phone && { phone }))
             });
         }
         // Update RetailerProfile model
@@ -2172,7 +2181,10 @@ const updateProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             where: { id: retailerProfile.id },
             data: Object.assign(Object.assign({}, (shopNameUpdate && { shopName: shopNameUpdate })), (address && { address })
             // tin_number is ignored as it's not in schema
-            )
+            ),
+            include: {
+                user: true
+            }
         });
         res.json({ success: true, message: 'Profile updated successfully', profile: updatedRetailer });
     }
