@@ -1217,6 +1217,7 @@ const fulfillSale = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.fulfillSale = fulfillSale;
 // Get Daily Sales Stats
 const getDailySales = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
         const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
             where: { userId: req.user.id }
@@ -1236,20 +1237,59 @@ const getDailySales = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         });
         const totalSales = todaySales.reduce((sum, s) => sum + s.totalAmount, 0);
         const transactionCount = todaySales.length;
-        // Aggregation by payment method
-        const paymentMethods = todaySales.reduce((acc, s) => {
-            const method = s.paymentMethod;
-            acc[method] = (acc[method] || 0) + 1;
-            return acc;
-        }, {});
+        const saleIds = todaySales.map(s => s.id.toString());
+        // Query wallet transactions for today's sales to get accurate wallet use counts
+        const walletTx = yield prisma_1.default.walletTransaction.findMany({
+            where: {
+                reference: { in: saleIds },
+                status: 'completed'
+            },
+            include: {
+                wallet: true
+            }
+        });
+        const dashboardWalletSales = new Set();
+        const creditWalletSales = new Set();
+        for (const tx of walletTx) {
+            if (tx.reference) {
+                if (((_a = tx.wallet) === null || _a === void 0 ? void 0 : _a.type) === 'dashboard_wallet') {
+                    dashboardWalletSales.add(tx.reference);
+                }
+                else if (((_b = tx.wallet) === null || _b === void 0 ? void 0 : _b.type) === 'credit_wallet') {
+                    creditWalletSales.add(tx.reference);
+                }
+            }
+        }
+        // Add direct (non-NFC) wallet/credit payments
+        todaySales.forEach(s => {
+            if (s.paymentMethod === 'wallet' || s.paymentMethod === 'dashboard_wallet') {
+                dashboardWalletSales.add(s.id.toString());
+            }
+            else if (s.paymentMethod === 'credit_wallet') {
+                creditWalletSales.add(s.id.toString());
+            }
+        });
+        // Aggregate mobile payments
+        const mobilePaymentCount = todaySales.filter(s => ['mobile_money', 'momo', 'airtel'].includes(s.paymentMethod)).length;
+        // Aggregate Gas Rewards
+        const todayGasRewards = yield prisma_1.default.gasReward.findMany({
+            where: {
+                saleId: { in: todaySales.map(s => s.id) }
+            }
+        });
+        const gasRewardsM3 = todayGasRewards.reduce((sum, r) => sum + r.units, 0);
+        const gasRewardsRwf = todayGasRewards.reduce((sum, r) => {
+            const rwf = r.profitAmount != null ? r.profitAmount * 0.12 : r.units * 6500;
+            return sum + rwf;
+        }, 0);
         res.json({
             total_sales: totalSales,
             transaction_count: transactionCount,
-            mobile_payment_transactions: paymentMethods['mobile_money'] || 0,
-            dashboard_wallet_transactions: paymentMethods['dashboard_wallet'] || 0,
-            credit_wallet_transactions: paymentMethods['credit_wallet'] || 0,
-            gas_rewards_m3: 0,
-            gas_rewards_rwf: 0
+            mobile_payment_transactions: mobilePaymentCount,
+            dashboard_wallet_transactions: dashboardWalletSales.size,
+            credit_wallet_transactions: creditWalletSales.size,
+            gas_rewards_m3: gasRewardsM3,
+            gas_rewards_rwf: Math.round(gasRewardsRwf)
         });
     }
     catch (error) {
