@@ -584,6 +584,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
           to: user.email,
           templateType: 'password-reset', // Mapped to SYS-EMAIL-002
           data: {
+            customer_name: user.name || 'Customer',
             temp_password: tempPass
           },
           relatedEntity: { type: 'USER', id: user.id.toString() }
@@ -593,6 +594,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
           to: user.phone,
           templateType: 'password-reset-SMS', // Mapped to SYS-SMS-002
           data: {
+            customer_name: user.name || 'Customer',
             temp_password: tempPass
           },
           relatedEntity: { type: 'USER', id: user.id.toString() }
@@ -614,7 +616,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
           const { SMSService } = await import('../services/sms.service');
           await SMSService.sendSMS(
             user.phone!,
-            `Your temporary password is: ${tempPass}. Please log in and change it immediately.`,
+            `Welcome ${user.name || 'Customer'}, your temporary password is ${tempPass}. Please log in and change it. for support call: +250788541239`,
             'password-reset-SMS',
             { type: 'USER', id: user.id.toString() }
           );

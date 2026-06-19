@@ -121,6 +121,26 @@ export class TemplateService {
           subject: `✅ Order Confirmation: #${data.orderNumber}`,
           html: this.getOrderConfirmationTemplate(data.orderNumber, data.quantity, data.totalAmount)
         };
+      case 'password-reset':
+      case 'SYS-EMAIL-002':
+        return {
+          subject: '🔐 Temporary Password Reset - Big Innovation Group Ltd',
+          html: this.wrap(`
+            <p>Hello <strong>${data.customer_name || 'Customer'}</strong>,</p>
+            <p>We received a request to reset your password on the Big Innovation Group Ltd platform. A temporary password has been generated for your account:</p>
+            <div style="background-color: #f3f4f6; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0;">
+              <code style="font-size: 20px; font-weight: bold; color: #6366f1; letter-spacing: 1px;">${data.temp_password || ''}</code>
+            </div>
+            <p style="color: #ef4444; font-size: 14px;"><strong>Important:</strong> You will be required to change this password immediately upon logging in.</p>
+            <p>If you did not request this, please contact support immediately at info@big.co.rw.</p>
+          `)
+        };
+      case 'password-reset-SMS':
+      case 'SYS-SMS-002':
+        return {
+          subject: 'Temporary Password Reset',
+          html: `Welcome ${data.customer_name || 'Customer'}, your temporary password is ${data.temp_password || ''}. Please log in and change it. for support call: +250788541239`
+        };
       default:
         return {
           subject: data.subject || 'System Notification',

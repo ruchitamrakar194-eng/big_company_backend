@@ -91,11 +91,21 @@ export const getCustomerProfile = async (req: AuthRequest, res: Response) => {
         if (!consumerProfile.gasRewardWalletId || consumerProfile.gasRewardWalletId.startsWith('GRW-')) {
             const phoneId = consumerProfile.user.phone;
             if (phoneId) {
-                await prisma.consumerProfile.update({
-                    where: { id: consumerProfile.id },
-                    data: { gasRewardWalletId: phoneId }
-                });
-                consumerProfile.gasRewardWalletId = phoneId;
+                try {
+                    // Check if another profile already claims this ID to prevent crashes
+                    const duplicate = await prisma.consumerProfile.findFirst({
+                        where: { gasRewardWalletId: phoneId, id: { not: consumerProfile.id } }
+                    });
+                    if (!duplicate) {
+                        await prisma.consumerProfile.update({
+                            where: { id: consumerProfile.id },
+                            data: { gasRewardWalletId: phoneId }
+                        });
+                        consumerProfile.gasRewardWalletId = phoneId;
+                    }
+                } catch (dbErr) {
+                    console.warn('Failed to auto-update gasRewardWalletId:', dbErr);
+                }
             }
         }
 
