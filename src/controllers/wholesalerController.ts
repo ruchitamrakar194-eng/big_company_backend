@@ -110,12 +110,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       include: { product: true }
     });
 
-    // Calculate profit wallet (realized profit from delivered orders)
-    const deliveredOrderItems = orderItems.filter(item => {
+    // Calculate profit wallet (realized profit from confirmed sales/revenue)
+    const confirmedOrderItems = orderItems.filter(item => {
       const order = allOrders.find(o => o.id === item.orderId);
-      return order && order.status === 'delivered';
+      return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
     });
-    const profitWallet = deliveredOrderItems.reduce((sum, item) =>
+    const profitWallet = confirmedOrderItems.reduce((sum, item) =>
       sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0
     );
 
