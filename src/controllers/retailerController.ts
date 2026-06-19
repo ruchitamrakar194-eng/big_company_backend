@@ -2333,19 +2333,21 @@ export const updateProfile = async (req: AuthRequest, res: Response) => {
       company_name, // Frontend sends this
       address,
       tin_number,
-      email
+      email,
+      phone
     } = req.body;
 
     // Use company_name if shop_name is not provided
     const shopNameUpdate = shop_name || company_name;
 
     // Update User model if needed
-    if (name || email) {
+    if (name || email || phone) {
       await prisma.user.update({
         where: { id: userId as any },
         data: {
           ...(name && { name }),
-          ...(email && { email })
+          ...(email && { email }),
+          ...(phone && { phone })
         }
       });
     }
@@ -2357,6 +2359,9 @@ export const updateProfile = async (req: AuthRequest, res: Response) => {
         ...(shopNameUpdate && { shopName: shopNameUpdate }),
         ...(address && { address })
         // tin_number is ignored as it's not in schema
+      },
+      include: {
+        user: true
       }
     });
 
