@@ -655,14 +655,16 @@ const getWholesalers = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 user: true,
                 receivedOrders: {
                     select: {
-                        totalAmount: true
+                        totalAmount: true,
+                        status: true
                     }
                 }
             }
         });
         const formattedWholesalers = wholesalers.map(wholesaler => {
-            const orders = wholesaler.receivedOrders.length;
-            const revenue = wholesaler.receivedOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+            const deliveredOrders = wholesaler.receivedOrders.filter(o => o.status === 'delivered');
+            const orders = deliveredOrders.length;
+            const revenue = deliveredOrders.reduce((sum, o) => sum + o.totalAmount, 0);
             return Object.assign(Object.assign({}, wholesaler), { orders,
                 revenue });
         });
@@ -2336,6 +2338,7 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
             where: { id: Number(id) },
             include: {
                 user: true,
+                linkedRetailer: true,
                 wallets: {
                     include: {
                         walletTransactions: {
