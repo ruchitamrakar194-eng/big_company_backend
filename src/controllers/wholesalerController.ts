@@ -304,13 +304,32 @@ export const getInventoryStats = async (req: AuthRequest, res: Response) => {
     const lowStockCount = products.filter(p => p.lowStockThreshold && p.stock > 0 && p.stock <= p.lowStockThreshold).length;
     const outOfStockCount = products.filter(p => p.stock === 0).length;
 
+    // Calculate realized profit (profit wallet) from confirmed sales/revenue
+    const orders = await prisma.order.findMany({
+      where: { wholesalerId: wholesalerProfile.id }
+    });
+    const orderItems = await prisma.orderItem.findMany({
+      where: {
+        order: { wholesalerId: wholesalerProfile.id }
+      },
+      include: { product: true }
+    });
+    const confirmedOrderItems = orderItems.filter(item => {
+      const order = orders.find(o => o.id === item.orderId);
+      return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
+    });
+    const realizedProfit = confirmedOrderItems.reduce((sum, item) =>
+      sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0
+    );
+
     res.json({
       totalProducts,
       stockValueSupplier,
       stockValueWholesaler,
       stockProfitMargin,
       lowStockCount,
-      outOfStockCount
+      outOfStockCount,
+      realizedProfit
     });
   } catch (error: any) {
     console.error('❌ Error fetching inventory stats:', error);
