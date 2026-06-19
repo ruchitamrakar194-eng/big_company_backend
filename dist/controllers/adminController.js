@@ -62,7 +62,9 @@ const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         const last7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         const last30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        const todayStart = new Date(now.setHours(0, 0, 0, 0));
+        // Fix dates math bug (avoid modifying now object in place)
+        const todayStart = new Date(now);
+        todayStart.setHours(0, 0, 0, 0);
         // 1. Customers
         const customerTotal = yield prisma_1.default.consumerProfile.count({ where: { user: { role: 'consumer' } } });
         const customerLast24h = yield prisma_1.default.consumerProfile.count({ where: { user: { role: 'consumer', createdAt: { gte: last24h } } } });
@@ -78,30 +80,47 @@ const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const orderProcessing = sales.filter(s => s.status === 'processing').length + wholesaleOrders.filter(o => o.status === 'processing').length;
         const orderDelivered = sales.filter(s => s.status === 'completed' || s.status === 'delivered').length + wholesaleOrders.filter(o => o.status === 'delivered').length;
         const orderCancelled = sales.filter(s => s.status === 'cancelled').length + wholesaleOrders.filter(o => o.status === 'cancelled').length;
-        const salesRevenue = sales.reduce((acc, s) => acc + s.totalAmount, 0);
+        const salesRevenue = sales.filter(s => s.status === 'completed' || s.status === 'delivered').reduce((acc, s) => acc + s.totalAmount, 0);
         const wholesaleRevenue = wholesaleOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.totalAmount, 0);
         const totalRevenue = Math.round(salesRevenue + wholesaleRevenue);
-        const todayOrders = sales.filter(s => s.createdAt >= todayStart).length + wholesaleOrders.filter(o => o.createdAt >= todayStart).length;
+        // Only count active/real orders (exclude cancelled) for today's orders
+        const todayOrders = sales.filter(s => s.createdAt >= todayStart && s.status !== 'cancelled').length + wholesaleOrders.filter(o => o.createdAt >= todayStart && o.status !== 'cancelled').length;
         // 3. Transactions (using WalletTransaction)
         const txs = yield prisma_1.default.walletTransaction.findMany({ where: { createdAt: { gte: last30d } } });
         const txTotal = yield prisma_1.default.walletTransaction.count();
         const walletTopups = txs.filter(t => t.type === 'top_up').length;
         const gasPurchases = txs.filter(t => t.type === 'gas_payment' || t.type === 'gas_purchase').length;
         const nfcPayments = sales.filter(s => s.paymentMethod === 'nfc' && s.createdAt >= last30d).length;
-        const totalVolume = Math.round(txs.reduce((acc, t) => acc + t.amount, 0));
-        // 4. Loans
+        const totalVolume = Math.round(txs.reduce((acc, t) => acc + Math.abs(t.amount), 0));
+        // 4. Loans (Include both customer loans and retailer credit loans)
         const loans = yield prisma_1.default.loan.findMany();
-        const loanTotal = loans.length;
+        const retailerCredits = yield prisma_1.default.retailerCredit.findMany();
+        const loanTotal = loans.length + retailerCredits.length;
         const loanPending = loans.filter(l => l.status === 'pending').length;
-        const loanActive = loans.filter(l => l.status === 'active' || l.status === 'approved').length;
-        const loanPaid = loans.filter(l => l.status === 'paid' || l.status === 'repaid').length;
+        // Active loans = customer active loans + retailers with outstanding credit balance
+        const loanActive = loans.filter(l => l.status === 'active' || l.status === 'approved').length + retailerCredits.filter(r => r.usedCredit > 0).length;
+        const loanPaid = loans.filter(l => l.status === 'paid' || l.status === 'repaid').length + retailerCredits.filter(r => r.usedCredit === 0).length;
         const loanDefaulted = loans.filter(l => l.status === 'defaulted' || l.status === 'overdue').length;
-        const outstandingAmount = Math.round(loans.reduce((acc, l) => (l.status === 'active' || l.status === 'approved' || l.status === 'defaulted' || l.status === 'overdue') ? acc + l.amount : acc, 0));
+        // Calculate actual outstanding balances (principal - repayments) + retailer outstanding credit balances
+        const customerLoanRepayments = yield prisma_1.default.walletTransaction.findMany({
+            where: { type: 'loan_repayment_replenish' }
+        });
+        const customerLoanOutstanding = loans.reduce((acc, l) => {
+            if (l.status === 'active' || l.status === 'approved' || l.status === 'defaulted' || l.status === 'overdue') {
+                const repayments = customerLoanRepayments.filter(r => r.reference === l.id.toString()).reduce((sum, r) => sum + r.amount, 0);
+                return acc + Math.max(0, l.amount - repayments);
+            }
+            return acc;
+        }, 0);
+        const retailerOutstanding = retailerCredits.reduce((acc, r) => acc + r.usedCredit, 0);
+        const outstandingAmount = Math.round(customerLoanOutstanding + retailerOutstanding);
         // 5. Gas (using GasTopup or Sale with gas category)
-        const gasTopups = yield prisma_1.default.gasTopup.findMany();
+        const gasTopups = yield prisma_1.default.gasTopup.findMany({
+            where: { status: { in: ['completed', 'success'] } }
+        });
         const gasTotalPurchases = gasTopups.length;
         const gasTotalAmount = Math.round(gasTopups.reduce((acc, g) => acc + g.amount, 0));
-        const gasTotalUnits = Math.round(gasTopups.reduce((acc, g) => acc + g.units, 0) * 100) / 100;
+        const gasTotalUnits = gasTopups.reduce((acc, g) => acc + g.units, 0);
         // 6. NFC Cards
         const nfcTotal = yield prisma_1.default.nfcCard.count();
         const nfcActive = yield prisma_1.default.nfcCard.count({ where: { status: 'active' } });
@@ -112,13 +131,16 @@ const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const retailerVerified = yield prisma_1.default.retailerProfile.count({ where: { isVerified: true } });
         const wholesalerTotal = yield prisma_1.default.wholesalerProfile.count();
         const wholesalerActive = yield prisma_1.default.wholesalerProfile.count({ where: { user: { isActive: true } } });
-        // 8. System-wide Wallets (Consumer & Retailer cash wallet balances)
+        // 8. System-wide Wallets (Consumer & Retailer cash wallet balances + secondary wallets)
         const consumerWalletSum = yield prisma_1.default.consumerProfile.aggregate({ _sum: { walletBalance: true } });
         const retailerWalletSum = yield prisma_1.default.retailerProfile.aggregate({ _sum: { walletBalance: true } });
-        const totalWalletBalance = Math.round((consumerWalletSum._sum.walletBalance || 0) + (retailerWalletSum._sum.walletBalance || 0));
-        // 9. System-wide Rewards (Consumer points)
-        const rewardsSum = yield prisma_1.default.consumerProfile.aggregate({ _sum: { rewardsPoints: true } });
-        const totalRewardsPoints = Math.round(rewardsSum._sum.rewardsPoints || 0);
+        const secondaryWalletsSum = yield prisma_1.default.wallet.aggregate({ _sum: { balance: true } });
+        const totalWalletBalance = Math.round((consumerWalletSum._sum.walletBalance || 0) +
+            (retailerWalletSum._sum.walletBalance || 0) +
+            (secondaryWalletsSum._sum.balance || 0));
+        // 9. System-wide Rewards (Sum of all historically distributed gas rewards)
+        const gasRewardsSum = yield prisma_1.default.gasReward.aggregate({ _sum: { units: true } });
+        const totalRewardsPoints = Math.round(gasRewardsSum._sum.units || 0);
         // 10. System-wide Inventory (Stock & evaluated cost value)
         const allProducts = yield prisma_1.default.product.findMany();
         const totalProductsCount = allProducts.length;
@@ -239,8 +261,10 @@ const getReports = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const { dateRange } = req.query;
         const now = new Date();
         let startDate = new Date(0); // All time default
+        const todayStart = new Date(now);
+        todayStart.setHours(0, 0, 0, 0);
         if (dateRange === 'today') {
-            startDate = new Date(now.setHours(0, 0, 0, 0));
+            startDate = todayStart;
         }
         else if (dateRange === '7days') {
             startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -252,39 +276,113 @@ const getReports = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             startDate = new Date(now.getFullYear(), 0, 1);
         }
         // 1. Stats based on date range
-        const [sales, gasTopups] = yield Promise.all([
+        const [sales, wholesaleOrders, gasTopups] = yield Promise.all([
             prisma_1.default.sale.findMany({ where: { createdAt: { gte: startDate } } }),
-            prisma_1.default.gasTopup.findMany({ where: { createdAt: { gte: startDate } } })
+            prisma_1.default.order.findMany({ where: { createdAt: { gte: startDate } } }),
+            prisma_1.default.gasTopup.findMany({ where: { createdAt: { gte: startDate }, status: { in: ['completed', 'success'] } } })
         ]);
-        const totalRevenue = sales.reduce((acc, s) => acc + s.totalAmount, 0);
-        const orderTotal = sales.length;
+        const salesRevenue = sales.filter(s => s.status === 'completed' || s.status === 'delivered').reduce((acc, s) => acc + s.totalAmount, 0);
+        const wholesaleRevenue = wholesaleOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.totalAmount, 0);
+        const totalRevenue = Math.round(salesRevenue + wholesaleRevenue);
+        const orderTotal = sales.filter(s => s.status !== 'cancelled').length + wholesaleOrders.filter(o => o.status !== 'cancelled').length;
         const gasDistributed = gasTopups.reduce((acc, g) => acc + g.units, 0);
         // 2. Global counts
-        const [retailerTotal, wholesalerTotal, productTotal, customerTotal, loans] = yield Promise.all([
+        const [retailerTotal, wholesalerTotal, productTotal, customerTotal, loans, retailerCredits] = yield Promise.all([
             prisma_1.default.retailerProfile.count(),
             prisma_1.default.wholesalerProfile.count(),
             prisma_1.default.product.count(),
             prisma_1.default.consumerProfile.count(),
-            prisma_1.default.loan.findMany()
+            prisma_1.default.loan.findMany(),
+            prisma_1.default.retailerCredit.findMany()
         ]);
-        const activeLoans = loans.filter(l => l.status === 'active' || l.status === 'approved').length;
+        const activeLoans = loans.filter(l => l.status === 'active' || l.status === 'approved').length + retailerCredits.filter(r => r.usedCredit > 0).length;
         const pendingLoans = loans.filter(l => l.status === 'pending').length;
-        const totalLoanAmount = loans.reduce((acc, l) => (l.status === 'active' || l.status === 'approved') ? acc + l.amount : acc, 0);
+        const customerLoanRepayments = yield prisma_1.default.walletTransaction.findMany({
+            where: { type: 'loan_repayment_replenish' }
+        });
+        const customerLoanOutstanding = loans.reduce((acc, l) => {
+            if (l.status === 'active' || l.status === 'approved' || l.status === 'defaulted' || l.status === 'overdue') {
+                const repayments = customerLoanRepayments.filter(r => r.reference === l.id.toString()).reduce((sum, r) => sum + r.amount, 0);
+                return acc + Math.max(0, l.amount - repayments);
+            }
+            return acc;
+        }, 0);
+        const retailerOutstanding = retailerCredits.reduce((acc, r) => acc + r.usedCredit, 0);
+        const totalLoanAmount = Math.round(customerLoanOutstanding + retailerOutstanding);
         // 3. Dynamic Growth rate calculation
         const periodDuration = now.getTime() - startDate.getTime();
         const prevPeriodStart = new Date(startDate.getTime() - periodDuration);
-        const prevSales = yield prisma_1.default.sale.findMany({
-            where: {
-                createdAt: {
-                    gte: prevPeriodStart,
-                    lt: startDate
+        const [prevSales, prevWholesale] = yield Promise.all([
+            prisma_1.default.sale.findMany({
+                where: {
+                    createdAt: {
+                        gte: prevPeriodStart,
+                        lt: startDate
+                    }
                 }
-            }
-        });
-        const prevRevenue = prevSales.reduce((acc, s) => acc + s.totalAmount, 0);
+            }),
+            prisma_1.default.order.findMany({
+                where: {
+                    createdAt: {
+                        gte: prevPeriodStart,
+                        lt: startDate
+                    }
+                }
+            })
+        ]);
+        const prevSalesRevenue = prevSales.filter(s => s.status === 'completed' || s.status === 'delivered').reduce((acc, s) => acc + s.totalAmount, 0);
+        const prevWholesaleRevenue = prevWholesale.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.totalAmount, 0);
+        const prevRevenue = Math.round(prevSalesRevenue + prevWholesaleRevenue);
         const growthRate = prevRevenue > 0
             ? Math.round(((totalRevenue - prevRevenue) / prevRevenue) * 1000) / 10
             : 12.5; // fallback to 12.5 if no previous data
+        // 4. Calculate Daily Sales Trend (grouped by formatted date)
+        const dailySalesMap = {};
+        sales.filter(s => s.status === 'completed' || s.status === 'delivered').forEach(s => {
+            const dateStr = s.createdAt.toISOString().split('T')[0];
+            dailySalesMap[dateStr] = (dailySalesMap[dateStr] || 0) + s.totalAmount;
+        });
+        wholesaleOrders.filter(o => o.status === 'delivered').forEach(o => {
+            const dateStr = o.createdAt.toISOString().split('T')[0];
+            dailySalesMap[dateStr] = (dailySalesMap[dateStr] || 0) + o.totalAmount;
+        });
+        const dailySales = Object.entries(dailySalesMap).map(([date, revenue]) => ({ date, revenue })).sort((a, b) => a.date.localeCompare(b.date));
+        // 5. Calculate Top Products (Top 5 based on sale items quantity)
+        const saleItems = yield prisma_1.default.saleItem.findMany({
+            where: { sale: { status: { in: ['completed', 'delivered'] } } },
+            include: { product: true }
+        });
+        const productSalesMap = {};
+        saleItems.forEach(item => {
+            if (item.product) {
+                const prodId = item.productId.toString();
+                if (!productSalesMap[prodId]) {
+                    productSalesMap[prodId] = { name: item.product.name, quantity: 0, revenue: 0 };
+                }
+                productSalesMap[prodId].quantity += item.quantity;
+                productSalesMap[prodId].revenue += item.quantity * item.price;
+            }
+        });
+        const topProducts = Object.values(productSalesMap)
+            .sort((a, b) => b.quantity - a.quantity)
+            .slice(0, 5);
+        // 6. Calculate Top Retailers (Top 5 based on sales revenue)
+        const retailers = yield prisma_1.default.retailerProfile.findMany({
+            include: {
+                sales: {
+                    where: { status: { in: ['completed', 'delivered'] } }
+                }
+            }
+        });
+        const topRetailers = retailers.map(r => {
+            const totalRevenue = r.sales.reduce((sum, s) => sum + s.totalAmount, 0);
+            return {
+                id: r.id,
+                shopName: r.shopName,
+                revenue: totalRevenue,
+                salesCount: r.sales.length
+            };
+        }).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
         res.json({
             success: true,
             summary: {
@@ -294,10 +392,13 @@ const getReports = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 wholesalerTotal,
                 gasDistributed,
                 growthRate,
+                dailySales,
+                topProducts,
+                topRetailers,
                 businessOverview: {
                     totalProducts: productTotal,
                     totalCustomers: customerTotal,
-                    totalSalesVolume: orderTotal, // Assuming volume means count here, or we could use total items
+                    totalSalesVolume: orderTotal,
                     avgOrderValue: orderTotal > 0 ? Math.round(totalRevenue / orderTotal) : 0
                 },
                 loanOverview: {
