@@ -1932,7 +1932,6 @@ export const approveLoan = async (req: AuthRequest, res: Response) => {
         await prisma.retailerCredit.update({
           where: { id: credit.id },
           data: {
-            creditLimit: { increment: request.amount },
             availableCredit: { increment: request.amount }
           }
         });
@@ -1946,11 +1945,6 @@ export const approveLoan = async (req: AuthRequest, res: Response) => {
           }
         });
       }
-
-      await prisma.retailerProfile.update({
-        where: { id: request.retailerId },
-        data: { creditLimit: { increment: request.amount } }
-      });
 
       return res.json({ success: true, loan: { id: numericId, status: 'approved' } });
     }

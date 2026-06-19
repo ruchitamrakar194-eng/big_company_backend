@@ -1055,6 +1055,17 @@ const applyForLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (!consumerProfile) {
             return res.status(404).json({ error: 'Consumer profile not found' });
         }
+        // Check if the user already has an active outstanding loan or pending request
+        const existingActiveLoans = yield prisma_1.default.loan.findMany({
+            where: {
+                consumerId: consumerProfile.id,
+                status: { in: ['pending', 'approved', 'active', 'defaulted', 'overdue'] }
+            }
+        });
+        if (existingActiveLoans.length > 0) {
+            return res.status(400).json({ error: 'You have a pending or active outstanding loan. Please pay it off in full first.' });
+        }
+        // Customer credit limit check (e.g. 50,000 RWF or custom if we have it)
         if (amount > 50000) {
             return res.status(400).json({ error: 'Amount exceeds maximum limit' });
         }

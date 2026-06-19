@@ -1275,7 +1275,6 @@ export const approveCreditRequest = async (req: AuthRequest, res: Response) => {
         await prisma.retailerCredit.update({
           where: { id: credit.id },
           data: {
-            creditLimit: { increment: request.amount },
             availableCredit: { increment: request.amount }
           }
         });

@@ -1763,7 +1763,6 @@ const approveLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 yield prisma_1.default.retailerCredit.update({
                     where: { id: credit.id },
                     data: {
-                        creditLimit: { increment: request.amount },
                         availableCredit: { increment: request.amount }
                     }
                 });
@@ -1778,10 +1777,6 @@ const approveLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     }
                 });
             }
-            yield prisma_1.default.retailerProfile.update({
-                where: { id: request.retailerId },
-                data: { creditLimit: { increment: request.amount } }
-            });
             return res.json({ success: true, loan: { id: numericId, status: 'approved' } });
         }
         const result = yield prisma_1.default.$transaction((prisma) => __awaiter(void 0, void 0, void 0, function* () {

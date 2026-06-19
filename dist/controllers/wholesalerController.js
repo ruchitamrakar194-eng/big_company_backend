@@ -1174,7 +1174,6 @@ const approveCreditRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 yield prisma.retailerCredit.update({
                     where: { id: credit.id },
                     data: {
-                        creditLimit: { increment: request.amount },
                         availableCredit: { increment: request.amount }
                     }
                 });
