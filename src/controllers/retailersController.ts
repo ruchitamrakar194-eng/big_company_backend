@@ -662,15 +662,10 @@ export const updateRetailerCreditLimit = async (req: AuthRequest, res: Response)
 
         let credit;
         if (existingCredit) {
-            // Calculate the difference and update available credit
-            const limitDifference = newLimit - existingCredit.creditLimit;
-            const newAvailableCredit = existingCredit.availableCredit + limitDifference;
-
             credit = await prisma.retailerCredit.update({
                 where: { retailerId: Number(id) },
                 data: {
-                    creditLimit: newLimit,
-                    availableCredit: newAvailableCredit
+                    creditLimit: newLimit
                 }
             });
         } else {

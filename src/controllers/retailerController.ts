@@ -1966,6 +1966,17 @@ export const requestCredit = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Invalid amount' });
     }
 
+    // Check if there is an active outstanding loan
+    const credit = await prisma.retailerCredit.findUnique({
+      where: { retailerId: retailerProfile.id }
+    });
+
+    if (credit && credit.usedCredit > 0) {
+      return res.status(400).json({
+        error: 'You have an active outstanding loan. You must repay your current loan in full before requesting a new one.'
+      });
+    }
+
     // Create CreditRequest
     const creditRequest = await prisma.creditRequest.create({
       data: {
