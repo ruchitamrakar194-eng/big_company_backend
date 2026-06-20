@@ -436,7 +436,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
         category: category || 'General',
         price: parseFloat(price),
         costPrice: costPrice ? parseFloat(costPrice) : undefined,
-        stock: stock ? parseInt(stock) : 0,
+        stock: stock ? parseFloat(stock) : 0,
         image: imageUrl,
         retailerId: retailerProfile.id,
         barcode: sku // Save sku as barcode for manual entry POS scanning
@@ -485,7 +485,7 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
         category,
         price: price ? parseFloat(price) : undefined,
         costPrice: costPrice ? parseFloat(costPrice) : undefined,
-        stock: stock !== undefined ? parseInt(stock) : undefined,
+        stock: stock !== undefined ? parseFloat(stock) : undefined,
         image: imageUrl,
         sku: sku !== undefined ? sku : undefined,
         barcode: sku !== undefined ? sku : undefined // Update barcode with sku

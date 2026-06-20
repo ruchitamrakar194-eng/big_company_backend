@@ -171,7 +171,7 @@ model Product {
   price             Float
   costPrice         Float?
   retailerPrice     Float?             @default(0)
-  stock             Int                @default(0)
+  stock             Float              @default(0)
   retailerId        Int?
   wholesalerId      Int?
   createdAt         DateTime           @default(now())
@@ -652,7 +652,7 @@ model OrderItem {
   id        Int     @id @default(autoincrement())
   orderId   Int
   productId Int
-  quantity  Int
+  quantity  Float
   price     Float
   order     Order   @relation(fields: [orderId], references: [id], onDelete: NoAction, map: "OrderItem_orderId_fkey")
   product   Product @relation(fields: [productId], references: [id], onDelete: NoAction, map: "OrderItem_productId_fkey")
@@ -780,7 +780,7 @@ model SaleItem {
   id        Int     @id @default(autoincrement())
   saleId    Int
   productId Int
-  quantity  Int
+  quantity  Float
   price     Float
   product   Product @relation(fields: [productId], references: [id], onDelete: NoAction, map: "SaleItem_productId_fkey")
   sale      Sale    @relation(fields: [saleId], references: [id], onDelete: NoAction, map: "SaleItem_saleId_fkey")

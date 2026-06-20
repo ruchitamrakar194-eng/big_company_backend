@@ -438,12 +438,12 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
     }
 
     // Parse stock
-    const parsedStock = stock ? parseInt(stock) : 0;
+    const parsedStock = stock ? parseFloat(stock) : 0;
     if (stock && (isNaN(parsedStock) || parsedStock < 0)) {
       console.error('❌ Invalid stock:', stock);
       return res.status(400).json({
         error: 'Invalid stock',
-        details: 'Stock must be a non-negative integer'
+        details: 'Stock must be a non-negative number'
       });
     }
 
