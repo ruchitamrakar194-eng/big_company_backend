@@ -371,7 +371,8 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
           const updateData: any = {
             stock: { increment: item.quantity },
             costPrice: item.price,
-            status: 'active'
+            status: 'active',
+            barcode: sourceProduct.barcode // Ensure barcode is set/updated
           };
           if (!existingProduct.retailerId) {
             updateData.retailerId = retailerProfile.id;
@@ -396,7 +397,8 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
               invoiceNumber: invoice_number,
               retailerId: retailerProfile.id,
               image: sourceProduct.image,
-              status: 'active'
+              status: 'active',
+              barcode: sourceProduct.barcode // Save wholesaler's barcode
             }
           });
           createdProducts.push(newProduct);
@@ -436,7 +438,8 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
         costPrice: costPrice ? parseFloat(costPrice) : undefined,
         stock: stock ? parseInt(stock) : 0,
         image: imageUrl,
-        retailerId: retailerProfile.id
+        retailerId: retailerProfile.id,
+        barcode: sku // Save sku as barcode for manual entry POS scanning
       }
     });
 
@@ -483,7 +486,9 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
         price: price ? parseFloat(price) : undefined,
         costPrice: costPrice ? parseFloat(costPrice) : undefined,
         stock: stock !== undefined ? parseInt(stock) : undefined,
-        image: imageUrl
+        image: imageUrl,
+        sku: sku !== undefined ? sku : undefined,
+        barcode: sku !== undefined ? sku : undefined // Update barcode with sku
       }
     });
 

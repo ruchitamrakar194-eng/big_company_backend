@@ -395,13 +395,26 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
     } = req.body;
 
     // Validate required fields
-    if (!name || !category || !wholesale_price) {
+    if (!name || !category || !wholesale_price || !barcode) {
       console.error('❌ Missing required fields');
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['name', 'category', 'wholesale_price'],
-        received: { name, category, wholesale_price }
+        required: ['name', 'category', 'wholesale_price', 'barcode'],
+        received: { name, category, wholesale_price, barcode }
       });
+    }
+
+    // Validate barcode uniqueness
+    if (barcode) {
+      const duplicateBarcode = await prisma.product.findFirst({
+        where: { barcode: barcode.trim() }
+      });
+      if (duplicateBarcode) {
+        console.error('❌ Duplicate barcode:', barcode);
+        return res.status(400).json({
+          error: 'A product with this barcode already exists in the platform.'
+        });
+      }
     }
 
     // Validate wholesale_price is a valid number
@@ -517,6 +530,21 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
       console.log('🖼️ Uploading new image to Cloudinary...');
       imageUrl = await uploadImage(image);
       console.log('✅ New image uploaded:', imageUrl);
+    }
+
+    // Validate barcode uniqueness
+    if (barcode) {
+      const duplicateBarcode = await prisma.product.findFirst({
+        where: {
+          barcode: barcode.trim(),
+          id: { not: Number(id) }
+        }
+      });
+      if (duplicateBarcode) {
+        return res.status(400).json({
+          error: 'A product with this barcode already exists in the platform.'
+        });
+      }
     }
 
     const product = await prisma.product.update({
@@ -1758,3 +1786,32 @@ export const getSettlementInvoice = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+// Generate a unique barcode across the platform
+export const generateUniqueBarcode = async (req: AuthRequest, res: Response) => {
+  try {
+    let isUnique = false;
+    let barcode = '';
+    let attempts = 0;
+    while (!isUnique && attempts < 100) {
+      attempts++;
+      // Generate a 12-digit random number (e.g. starting with 990 for custom generated codes)
+      const randomPart = Math.floor(100000000 + Math.random() * 900000000).toString();
+      barcode = `990${randomPart}`;
+      
+      const existing = await prisma.product.findFirst({
+        where: { barcode }
+      });
+      if (!existing) {
+        isUnique = true;
+      }
+    }
+    if (!isUnique) {
+      return res.status(500).json({ error: 'Could not generate a unique barcode' });
+    }
+    res.json({ barcode });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+

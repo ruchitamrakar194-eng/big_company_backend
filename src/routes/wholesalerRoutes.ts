@@ -4,6 +4,7 @@ import {
   getInventory,
   getInventoryStats,
   getCategories,
+  generateUniqueBarcode,
   createProduct,
   updateProduct,
   updateStock,
@@ -72,6 +73,7 @@ router.get('/dashboard/stats', getDashboardStats);
 router.get('/inventory', getInventory);
 router.get('/inventory/stats', getInventoryStats);
 router.get('/inventory/categories', getCategories);
+router.get('/inventory/generate-barcode', generateUniqueBarcode);
 router.post('/inventory', createProduct);
 router.put('/inventory/:id', updateProduct);
 router.post('/inventory/:id/stock', updateStock);
