@@ -110,14 +110,9 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     if (paymentMethod === 'credit_wallet') {
       log('Credit wallet payment, no rewards');
       shouldCalculateReward = false;
-    }
-    else if (paymentMethod === 'mobile_money') {
-      shouldCalculateReward = !!targetRewardId;
-      log(`Mobile money, rewards: ${shouldCalculateReward}`);
-    }
-    else if (['dashboard_wallet', 'wallet', 'nfc_card'].includes(paymentMethod)) {
-      shouldCalculateReward = !!targetRewardId;
-      log(`Wallet/NFC payment, rewards: ${shouldCalculateReward}`);
+    } else {
+      shouldCalculateReward = true;
+      log(`Rewards enabled for payment method: ${paymentMethod}`);
     }
 
     // Resolve which consumer receives the gas reward.
