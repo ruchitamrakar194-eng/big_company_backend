@@ -171,11 +171,19 @@ export const login = async (req: Request, res: Response) => {
 
     // Verify Password or PIN
     let valid = false;
-    if (targetuser_role === 'consumer') {
-      if (user.pin && pin && await comparePassword(pin, user.pin)) valid = true;
-      else if (user.password && password && await comparePassword(password, user.password)) valid = true;
+    if (user.isFirstLogin) {
+      // Must validate only the temporary password (which is stored in user.password)
+      const inputPass = (targetuser_role === 'consumer' && pin) ? pin : password;
+      if (inputPass && user.password && await comparePassword(inputPass, user.password)) {
+        valid = true;
+      }
     } else {
-      if (user.password && await comparePassword(password, user.password)) valid = true;
+      if (targetuser_role === 'consumer') {
+        if (user.pin && pin && await comparePassword(pin, user.pin)) valid = true;
+        else if (user.password && password && await comparePassword(password, user.password)) valid = true;
+      } else {
+        if (user.password && await comparePassword(password, user.password)) valid = true;
+      }
     }
 
     if (!valid) {
