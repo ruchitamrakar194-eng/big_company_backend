@@ -824,7 +824,7 @@ export const createSale = async (req: AuthRequest, res: Response) => {
       payment_details // { pin, uid } for NFC
     } = req.body;
 
-    const total = (subtotal + tax_amount - (discount || 0));
+    const total = (subtotal - (discount || 0));
 
     // 1. Validate items and stock
     const productIds = items.map((item: any) => Number(item.product_id));
