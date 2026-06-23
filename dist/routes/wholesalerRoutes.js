@@ -15,6 +15,7 @@ router.get('/dashboard/stats', wholesalerController_1.getDashboardStats);
 router.get('/inventory', wholesalerController_1.getInventory);
 router.get('/inventory/stats', wholesalerController_1.getInventoryStats);
 router.get('/inventory/categories', wholesalerController_1.getCategories);
+router.get('/inventory/generate-barcode', wholesalerController_1.generateUniqueBarcode);
 router.post('/inventory', wholesalerController_1.createProduct);
 router.put('/inventory/:id', wholesalerController_1.updateProduct);
 router.post('/inventory/:id/stock', wholesalerController_1.updateStock);

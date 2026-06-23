@@ -373,7 +373,8 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     const updateData = {
                         stock: { increment: item.quantity },
                         costPrice: item.price,
-                        status: 'active'
+                        status: 'active',
+                        barcode: sourceProduct.barcode // Ensure barcode is set/updated
                     };
                     if (!existingProduct.retailerId) {
                         updateData.retailerId = retailerProfile.id;
@@ -399,7 +400,8 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                             invoiceNumber: invoice_number,
                             retailerId: retailerProfile.id,
                             image: sourceProduct.image,
-                            status: 'active'
+                            status: 'active',
+                            barcode: sourceProduct.barcode // Save wholesaler's barcode
                         }
                     });
                     createdProducts.push(newProduct);
@@ -433,9 +435,10 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 category: category || 'General',
                 price: parseFloat(price),
                 costPrice: costPrice ? parseFloat(costPrice) : undefined,
-                stock: stock ? parseInt(stock) : 0,
+                stock: stock ? parseFloat(stock) : 0,
                 image: imageUrl,
-                retailerId: retailerProfile.id
+                retailerId: retailerProfile.id,
+                barcode: sku // Save sku as barcode for manual entry POS scanning
             }
         });
         res.json({ success: true, product });
@@ -478,8 +481,10 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 category,
                 price: price ? parseFloat(price) : undefined,
                 costPrice: costPrice ? parseFloat(costPrice) : undefined,
-                stock: stock !== undefined ? parseInt(stock) : undefined,
-                image: imageUrl
+                stock: stock !== undefined ? parseFloat(stock) : undefined,
+                image: imageUrl,
+                sku: sku !== undefined ? sku : undefined,
+                barcode: sku !== undefined ? sku : undefined // Update barcode with sku
             }
         });
         res.json({ success: true, product });
@@ -781,7 +786,7 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const { items, payment_method, // 'cash', 'nfc', 'wallet', 'momo'
         subtotal, tax_amount, discount, customer_phone, payment_details // { pin, uid } for NFC
          } = req.body;
-        const total = (subtotal + tax_amount - (discount || 0));
+        const total = (subtotal - (discount || 0));
         // 1. Validate items and stock
         const productIds = items.map((item) => Number(item.product_id));
         const products = yield prisma_1.default.product.findMany({
@@ -977,8 +982,10 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                     }
                 }
                 if (totalProfit > 0) {
+                    const config = yield prisma.systemConfig.findFirst();
+                    const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || 6500;
                     const rewardAmountRWF = totalProfit * 0.12; // 12% of profit
-                    const rewardUnits = Number((rewardAmountRWF / 6500).toFixed(4));
+                    const rewardUnits = Number((rewardAmountRWF / gasPrice).toFixed(4));
                     yield prisma.gasReward.create({
                         data: {
                             consumerId: consumerId,
@@ -1277,9 +1284,11 @@ const getDailySales = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 saleId: { in: todaySales.map(s => s.id) }
             }
         });
+        const config = yield prisma_1.default.systemConfig.findFirst();
+        const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || 6500;
         const gasRewardsM3 = todayGasRewards.reduce((sum, r) => sum + r.units, 0);
         const gasRewardsRwf = todayGasRewards.reduce((sum, r) => {
-            const rwf = r.profitAmount != null ? r.profitAmount * 0.12 : r.units * 6500;
+            const rwf = r.units * gasPrice;
             return sum + rwf;
         }, 0);
         res.json({

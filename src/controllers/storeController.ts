@@ -142,9 +142,11 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       });
       log(`Found ${gasRewards.length} reward records`);
 
-      // Calculate total reward gas balance in RWF (units * 6500 RWF per unit)
+      // Calculate total reward gas balance in RWF (units * gasPrice per unit)
+      const config = await prisma.systemConfig.findFirst();
+      const gasPrice = config?.gasPricePerM3 || 6500;
       const totalGasUnits = gasRewards.reduce((sum, r) => sum + r.units, 0);
-      const totalGasRwf = totalGasUnits * 6500; // 6500 RWF per M³
+      const totalGasRwf = totalGasUnits * gasPrice; // M³ to RWF
 
       if (rewardGasAmount > totalGasRwf) {
         return res.status(400).json({
@@ -166,7 +168,9 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       // 1. Deduct Reward Gas if applied
       if (rewardGasApplied > 0) {
         log(`Deducting ${rewardGasApplied} reward gas...`);
-        const gasUnitsToDeduct = rewardGasApplied / 6500; // Convert RWF to gas units
+        const config = await prisma.systemConfig.findFirst();
+        const gasPrice = config?.gasPricePerM3 || 6500;
+        const gasUnitsToDeduct = rewardGasApplied / gasPrice; // Convert RWF to gas units
 
         // Create negative gas reward entry (deduction)
         await tx.gasReward.create({
@@ -366,9 +370,11 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           }
         }
 
+        const config = await prisma.systemConfig.findFirst();
+        const gasPrice = config?.gasPricePerM3 || 6500;
         const rewardAmountRWF = totalProfit * 0.12;
-        // Convert to gas units where 1 m³ = 6500 RWF, rounded to 4 decimal places
-        const rewardUnits = Number((rewardAmountRWF / 6500).toFixed(4));
+        // Convert to gas units where 1 m³ = gasPrice RWF, rounded to 4 decimal places
+        const rewardUnits = Number((rewardAmountRWF / gasPrice).toFixed(4));
 
         if (rewardUnits > 0) {
           console.log('Awarding gas rewards:', rewardUnits);
@@ -1501,8 +1507,10 @@ export const getRewardGasBalance = async (req: AuthRequest, res: Response) => {
     });
 
     // Calculate total balance
+    const config = await prisma.systemConfig.findFirst();
+    const gasPrice = config?.gasPricePerM3 || 6500;
     const totalUnits = gasRewards.reduce((sum, r) => sum + r.units, 0);
-    const totalRwf = totalUnits * 6500; // 6500 RWF per M³
+    const totalRwf = totalUnits * gasPrice;
 
     res.json({
       success: true,
@@ -1514,7 +1522,7 @@ export const getRewardGasBalance = async (req: AuthRequest, res: Response) => {
       recentTransactions: gasRewards.slice(0, 10).map(r => ({
         id: r.id,
         units: r.units,
-        rwf: r.units * 6500,
+        rwf: r.units * gasPrice,
         source: r.source,
         reference: r.reference,
         createdAt: r.createdAt

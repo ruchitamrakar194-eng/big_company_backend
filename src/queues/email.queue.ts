@@ -64,7 +64,7 @@ export const emailWorker = new Worker(
         }
       } catch (err) {}
 
-      const isSMS = resolvedTemplateName.includes('SMS') || (templateType && templateType.includes('SMS'));
+      let isSMS = resolvedTemplateName.includes('SMS') || (templateType && templateType.includes('SMS'));
 
       // If data is provided, we MUST use the TemplateService to get the content
       // This ensures we use the DB-stored templates if they exist (Requirement 4.2.1)
@@ -75,6 +75,9 @@ export const emailWorker = new Worker(
         const template = await TemplateService.getTemplate(resolvedTemplateName, data);
         finalSubject = template.subject;
         finalHtml = template.html;
+        if (template.isSMS !== undefined) {
+          isSMS = template.isSMS;
+        }
       }
 
       // ROUTING LOGIC: If resolved template name contains SMS, send via SMSService

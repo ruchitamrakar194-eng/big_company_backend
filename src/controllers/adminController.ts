@@ -3532,13 +3532,13 @@ export const getEmailTemplates = async (req: AuthRequest, res: Response) => {
  */
 export const saveEmailTemplate = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, subject, content, description, isActive, portal, triggerName } = req.body;
+    const { name, subject, content, description, isActive, portal, triggerName, channel } = req.body;
 
     // @ts-ignore
     const template = await prisma.emailTemplate.upsert({
       where: { name },
-      update: { subject, content, description, isActive, portal, triggerName },
-      create: { name, subject, content, description, isActive, portal, triggerName }
+      update: { subject, content, description, isActive, portal, triggerName, channel },
+      create: { name, subject, content, description, isActive, portal, triggerName, channel }
     });
 
     res.json({ success: true, template, message: 'Template saved successfully' });

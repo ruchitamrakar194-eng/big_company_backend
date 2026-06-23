@@ -1049,8 +1049,10 @@ export const createSale = async (req: AuthRequest, res: Response) => {
         }
 
         if (totalProfit > 0) {
+          const config = await prisma.systemConfig.findFirst();
+          const gasPrice = config?.gasPricePerM3 || 6500;
           const rewardAmountRWF = totalProfit * 0.12; // 12% of profit
-          const rewardUnits = Number((rewardAmountRWF / 6500).toFixed(4));
+          const rewardUnits = Number((rewardAmountRWF / gasPrice).toFixed(4));
 
           await prisma.gasReward.create({
             data: {
@@ -1387,9 +1389,11 @@ export const getDailySales = async (req: AuthRequest, res: Response) => {
       }
     });
 
+    const config = await prisma.systemConfig.findFirst();
+    const gasPrice = config?.gasPricePerM3 || 6500;
     const gasRewardsM3 = todayGasRewards.reduce((sum, r) => sum + r.units, 0);
     const gasRewardsRwf = todayGasRewards.reduce((sum, r) => {
-      const rwf = r.profitAmount != null ? r.profitAmount * 0.12 : r.units * 6500;
+      const rwf = r.units * gasPrice;
       return sum + rwf;
     }, 0);
 
@@ -1966,20 +1970,61 @@ export const requestCredit = async (req: AuthRequest, res: Response) => {
     }
 
     const { amount, reason } = req.body;
-
-    if (!amount || amount <= 0) {
+    const parsedAmount = parseFloat(amount);
+    if (!amount || parsedAmount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
     }
 
-    // Check if there is an active outstanding loan
+    // Check effective Credit Limit set by wholesaler
     const credit = await prisma.retailerCredit.findUnique({
       where: { retailerId: retailerProfile.id }
     });
 
+    const creditLimit = credit ? credit.creditLimit : retailerProfile.creditLimit;
+    if (parsedAmount > creditLimit) {
+      return res.status(400).json({
+        error: `Requested amount exceeds your credit limit of ${creditLimit.toLocaleString()} RWF.`
+      });
+    }
+
+    // Check if there is already a pending credit request
+    const pendingRequest = await prisma.creditRequest.findFirst({
+      where: { retailerId: retailerProfile.id, status: 'pending' }
+    });
+    if (pendingRequest) {
+      return res.status(400).json({
+        error: 'You already have a pending credit request. Please wait for it to be processed.'
+      });
+    }
+
+    // Check if there is an active outstanding loan
     if (credit && credit.usedCredit > 0) {
       return res.status(400).json({
         error: 'You have an active outstanding loan. You must repay your current loan in full before requesting a new one.'
       });
+    }
+
+    // Single Active Credit Rule: check if there is an approved loan that has not yet been used
+    const latestApprovedRequest = await prisma.creditRequest.findFirst({
+      where: { retailerId: retailerProfile.id, status: 'approved' },
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    if (latestApprovedRequest) {
+      // Check if they placed any credit orders since this latest request was approved
+      const creditOrdersCount = await prisma.order.count({
+        where: {
+          retailerId: retailerProfile.id,
+          paymentMethod: 'credit',
+          createdAt: { gte: latestApprovedRequest.updatedAt || latestApprovedRequest.createdAt }
+        }
+      });
+
+      if (creditOrdersCount === 0) {
+        return res.status(400).json({
+          error: 'You already have an active approved credit limit that has not been used yet.'
+        });
+      }
     }
 
     // Create CreditRequest
@@ -2099,7 +2144,8 @@ export const makeRepayment = async (req: AuthRequest, res: Response) => {
         await prisma.retailerCredit.update({
           where: { retailerId: retailerProfile.id },
           data: {
-            usedCredit: { decrement: amount }
+            usedCredit: { decrement: amount },
+            availableCredit: { increment: amount }
           }
         });
       }
@@ -2176,7 +2222,8 @@ export const payCredit = async (req: AuthRequest, res: Response) => {
         await tx.retailerCredit.update({
           where: { retailerId: retailerProfile.id },
           data: {
-            usedCredit: { decrement: amount }
+            usedCredit: { decrement: amount },
+            availableCredit: { increment: amount }
           }
         });
       }

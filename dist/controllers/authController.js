@@ -206,15 +206,24 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         }
         // Verify Password or PIN
         let valid = false;
-        if (targetuser_role === 'consumer') {
-            if (user.pin && pin && (yield (0, auth_1.comparePassword)(pin, user.pin)))
+        if (user.isFirstLogin) {
+            // Must validate only the temporary password (which is stored in user.password)
+            const inputPass = (targetuser_role === 'consumer' && pin) ? pin : password;
+            if (inputPass && user.password && (yield (0, auth_1.comparePassword)(inputPass, user.password))) {
                 valid = true;
-            else if (user.password && password && (yield (0, auth_1.comparePassword)(password, user.password)))
-                valid = true;
+            }
         }
         else {
-            if (user.password && (yield (0, auth_1.comparePassword)(password, user.password)))
-                valid = true;
+            if (targetuser_role === 'consumer') {
+                if (user.pin && pin && (yield (0, auth_1.comparePassword)(pin, user.pin)))
+                    valid = true;
+                else if (user.password && password && (yield (0, auth_1.comparePassword)(password, user.password)))
+                    valid = true;
+            }
+            else {
+                if (user.password && (yield (0, auth_1.comparePassword)(password, user.password)))
+                    valid = true;
+            }
         }
         if (!valid) {
             // Notify Retailer of Failed Login (RET-EMAIL-017)

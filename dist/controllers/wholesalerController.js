@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailer = exports.getLinkedRetailers = exports.rejectLinkRequest = exports.approveLinkRequest = exports.getLinkRequests = exports.rejectCreditRequest = exports.approveCreditRequest = exports.getCreditRequests = exports.confirmDelivery = exports.shipOrder = exports.rejectOrder = exports.confirmOrder = exports.getOrderStats = exports.updateOrderStatus = exports.getOrder = exports.getRetailerOrders = exports.deleteProduct = exports.updatePrice = exports.updateStock = exports.updateProduct = exports.createProduct = exports.getCategories = exports.getInventoryStats = exports.getInventory = exports.getDashboardStats = void 0;
+exports.generateUniqueBarcode = exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailer = exports.getLinkedRetailers = exports.rejectLinkRequest = exports.approveLinkRequest = exports.getLinkRequests = exports.rejectCreditRequest = exports.approveCreditRequest = exports.getCreditRequests = exports.confirmDelivery = exports.shipOrder = exports.rejectOrder = exports.confirmOrder = exports.getOrderStats = exports.updateOrderStatus = exports.getOrder = exports.getRetailerOrders = exports.deleteProduct = exports.updatePrice = exports.updateStock = exports.updateProduct = exports.createProduct = exports.getCategories = exports.getInventoryStats = exports.getInventory = exports.getDashboardStats = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const cloudinary_1 = require("../utils/cloudinary");
 const email_queue_1 = require("../queues/email.queue");
@@ -367,13 +367,25 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         stock, unit, low_stock_threshold, invoice_number, barcode, image // Base64 string from frontend
          } = req.body;
         // Validate required fields
-        if (!name || !category || !wholesale_price) {
+        if (!name || !category || !wholesale_price || !barcode) {
             console.error('❌ Missing required fields');
             return res.status(400).json({
                 error: 'Missing required fields',
-                required: ['name', 'category', 'wholesale_price'],
-                received: { name, category, wholesale_price }
+                required: ['name', 'category', 'wholesale_price', 'barcode'],
+                received: { name, category, wholesale_price, barcode }
             });
+        }
+        // Validate barcode uniqueness
+        if (barcode) {
+            const duplicateBarcode = yield prisma_1.default.product.findFirst({
+                where: { barcode: barcode.trim() }
+            });
+            if (duplicateBarcode) {
+                console.error('❌ Duplicate barcode:', barcode);
+                return res.status(400).json({
+                    error: 'A product with this barcode already exists in the platform.'
+                });
+            }
         }
         // Validate wholesale_price is a valid number
         const parsedPrice = parseFloat(wholesale_price);
@@ -394,12 +406,12 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             });
         }
         // Parse stock
-        const parsedStock = stock ? parseInt(stock) : 0;
+        const parsedStock = stock ? parseFloat(stock) : 0;
         if (stock && (isNaN(parsedStock) || parsedStock < 0)) {
             console.error('❌ Invalid stock:', stock);
             return res.status(400).json({
                 error: 'Invalid stock',
-                details: 'Stock must be a non-negative integer'
+                details: 'Stock must be a non-negative number'
             });
         }
         // Parse optional low_stock_threshold
@@ -480,6 +492,20 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             console.log('🖼️ Uploading new image to Cloudinary...');
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
             console.log('✅ New image uploaded:', imageUrl);
+        }
+        // Validate barcode uniqueness
+        if (barcode) {
+            const duplicateBarcode = yield prisma_1.default.product.findFirst({
+                where: {
+                    barcode: barcode.trim(),
+                    id: { not: Number(id) }
+                }
+            });
+            if (duplicateBarcode) {
+                return res.status(400).json({
+                    error: 'A product with this barcode already exists in the platform.'
+                });
+            }
         }
         const product = yield prisma_1.default.product.update({
             where: {
@@ -1620,3 +1646,31 @@ const getSettlementInvoice = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.getSettlementInvoice = getSettlementInvoice;
+// Generate a unique barcode across the platform
+const generateUniqueBarcode = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        let isUnique = false;
+        let barcode = '';
+        let attempts = 0;
+        while (!isUnique && attempts < 100) {
+            attempts++;
+            // Generate a 12-digit random number (e.g. starting with 990 for custom generated codes)
+            const randomPart = Math.floor(100000000 + Math.random() * 900000000).toString();
+            barcode = `990${randomPart}`;
+            const existing = yield prisma_1.default.product.findFirst({
+                where: { barcode }
+            });
+            if (!existing) {
+                isUnique = true;
+            }
+        }
+        if (!isUnique) {
+            return res.status(500).json({ error: 'Could not generate a unique barcode' });
+        }
+        res.json({ barcode });
+    }
+    catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.generateUniqueBarcode = generateUniqueBarcode;
