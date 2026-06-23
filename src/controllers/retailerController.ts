@@ -37,7 +37,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       allSales,
       inventory,
       pendingOrders,
-      gasRewardsAggregate
+      gasRewardsAggregate,
+      systemConfig
     ] = await Promise.all([
       // Today's Sales
       prisma.sale.findMany({
@@ -71,7 +72,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         _sum: {
           units: true
         }
-      })
+      }),
+      prisma.systemConfig.findFirst()
     ]);
 
     // Calculate Stats
@@ -250,7 +252,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         mobileMoneyRevenue: paymentStats['momo'] || 0,
         cashRevenue: paymentStats['cash'] || 0,
         gasRewardsGiven: gasRewardsAggregate._sum.units || 0,
-        gasRewardsValue: (gasRewardsAggregate._sum.units || 0) * 50000
+        gasRewardsValue: Math.round((gasRewardsAggregate._sum.units || 0) * (systemConfig?.gasPricePerM3 || 6500))
       },
 
       // Lists
@@ -3652,19 +3654,22 @@ export const getGasRewardsGiven = async (req: AuthRequest, res: Response) => {
     });
 
     // Calculate total m3 and value
-    const aggregate = await prisma.gasReward.aggregate({
-      where: {
-        sale: {
-          retailerId: retailerProfile.id
+    const [aggregate, systemConfig] = await Promise.all([
+      prisma.gasReward.aggregate({
+        where: {
+          sale: {
+            retailerId: retailerProfile.id
+          }
+        },
+        _sum: {
+          units: true
         }
-      },
-      _sum: {
-        units: true
-      }
-    });
+      }),
+      prisma.systemConfig.findFirst()
+    ]);
 
     const totalM3 = aggregate._sum.units || 0;
-    const totalValue = totalM3 * 50000; // Assuming 50000 RWF per M3 value for metrics
+    const totalValue = Math.round(totalM3 * (systemConfig?.gasPricePerM3 || 6500));
 
     const formattedRewards = rewards.map(r => ({
       id: r.id.toString(),

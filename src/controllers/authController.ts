@@ -316,22 +316,17 @@ export const login = async (req: Request, res: Response) => {
         const isNewDevice = !knownDevices.has(device);
         const isNewBrowser = !knownBrowsers.has(browser);
 
-        // Check for suspicious login behavior
-        const hour = new Date().getHours();
-        const isUnusualHour = hour >= 23 || hour <= 5; // Login between 11 PM and 5 AM
-
         // Login rate limits
         const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
         const recentLoginsCount = previousLogins.filter(l => new Date(l.createdAt) > tenMinutesAgo).length;
         const isHighFrequency = recentLoginsCount >= 5;
 
-        if (isNewIP || isNewDevice || isNewBrowser || isUnusualHour || isHighFrequency) {
+        if (isNewIP || isNewDevice || isNewBrowser || isHighFrequency) {
           isUnusual = true;
           const reasons = [];
           if (isNewIP) reasons.push('new IP address');
           if (isNewDevice) reasons.push('new device');
           if (isNewBrowser) reasons.push('new browser');
-          if (isUnusualHour) reasons.push('unusual hour');
           if (isHighFrequency) reasons.push('suspicious login frequency');
           unusualReason = `Unusual login detected: ${reasons.join(', ')}`;
         }
