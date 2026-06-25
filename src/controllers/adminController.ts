@@ -3416,7 +3416,7 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
 
         if (existingProduct) {
           // Update existing stock
-          const conversionFactor = existingProduct.conversionFactor ? Number(existingProduct.conversionFactor) : null;
+          const conversionFactor = (existingProduct as any).conversionFactor ? Number((existingProduct as any).conversionFactor) : null;
           let addStock = item.quantity;
           if (conversionFactor && conversionFactor > 0) {
             addStock = item.quantity * conversionFactor;
@@ -3441,7 +3441,7 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
             exciseDutyRatePct
           );
 
-          const conversionFactor = item.product.conversionFactor ? Number(item.product.conversionFactor) : null;
+          const conversionFactor = (item.product as any).conversionFactor ? Number((item.product as any).conversionFactor) : null;
           let addStock = item.quantity;
           if (conversionFactor && conversionFactor > 0) {
             addStock = item.quantity * conversionFactor;
@@ -3459,13 +3459,13 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
               stock: addStock,
               retailerId: updatedOrder.retailerId,
               unit: item.product.unit,
-              baseUnit: item.product.baseUnit,
-              purchaseUnit: item.product.purchaseUnit,
-              conversionFactor: item.product.conversionFactor,
+              baseUnit: (item.product as any).baseUnit,
+              purchaseUnit: (item.product as any).purchaseUnit,
+              conversionFactor: (item.product as any).conversionFactor,
               status: 'active',
               taxType: taxType,
               supplierCost: item.product.price              // The actual invoice amount they paid for the stock
-            }
+            } as any
           });
         }
       }
@@ -3573,13 +3573,13 @@ export const getEmailTemplates = async (req: AuthRequest, res: Response) => {
  */
 export const saveEmailTemplate = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, subject, content, description, isActive, portal, triggerName } = req.body;
+    const { name, subject, content, description, isActive, portal, triggerName, channel } = req.body;
 
     // @ts-ignore
     const template = await prisma.emailTemplate.upsert({
       where: { name },
-      update: { subject, content, description, isActive, portal, triggerName },
-      create: { name, subject, content, description, isActive, portal, triggerName }
+      update: { subject, content, description, isActive, portal, triggerName, channel },
+      create: { name, subject, content, description, isActive, portal, triggerName, channel }
     });
 
     res.json({ success: true, template, message: 'Template saved successfully' });

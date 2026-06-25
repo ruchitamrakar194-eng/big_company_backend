@@ -917,6 +917,20 @@ model WholesalerSettings {
   @@map("wholesalersettings")
 }
 
+model WholesalerLogin {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  ipAddress    String
+  userAgent    String
+  device       String
+  browser      String
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@map("wholesalerlogin")
+}
+
+
 // Settlement Invoice model for Admin Invoice Management after Monthly Settlement
 model SettlementInvoice {
   id                  Int                @id @default(autoincrement())

@@ -368,12 +368,21 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         stock, unit, low_stock_threshold, invoice_number, barcode, image, // Base64 string from frontend
         taxType, supplierCost, baseUnit, purchaseUnit, conversionFactor } = req.body;
         // Validate required fields
+<<<<<<< HEAD
         if (!name || !category || !barcode || !supplierCost) {
             console.error('❌ Missing required fields');
             return res.status(400).json({
                 error: 'Missing required fields',
                 required: ['name', 'category', 'barcode', 'supplierCost'],
                 received: { name, category, barcode, supplierCost }
+=======
+        if (!name || !category || !wholesale_price || !barcode) {
+            console.error('❌ Missing required fields');
+            return res.status(400).json({
+                error: 'Missing required fields',
+                required: ['name', 'category', 'wholesale_price', 'barcode'],
+                received: { name, category, wholesale_price, barcode }
+>>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
             });
         }
         // Validate barcode uniqueness
@@ -388,9 +397,15 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 });
             }
         }
+<<<<<<< HEAD
         // Validate wholesale_price is a valid number if provided (legacy support)
         const parsedPrice = wholesale_price ? parseFloat(wholesale_price) : 0;
         if (wholesale_price && (isNaN(parsedPrice) || parsedPrice < 0)) {
+=======
+        // Validate wholesale_price is a valid number
+        const parsedPrice = parseFloat(wholesale_price);
+        if (isNaN(parsedPrice) || parsedPrice < 0) {
+>>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
             console.error('❌ Invalid wholesale_price:', wholesale_price);
             return res.status(400).json({
                 error: 'Invalid wholesale price',

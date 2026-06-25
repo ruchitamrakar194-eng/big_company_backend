@@ -4,6 +4,45 @@ import { generateToken, hashPassword, comparePassword } from '../utils/auth';
 import { emailQueue } from '../queues/email.queue';
 import { validateBusinessEmailFormat } from '../utils/email-validator';
 
+function parseUserAgent(userAgent: string) {
+  let browser = 'Unknown Browser';
+  let device = 'Unknown Device';
+
+  if (!userAgent) return { browser, device };
+
+  const ua = userAgent.toLowerCase();
+
+  // Detect browser
+  if (ua.includes('firefox')) {
+    browser = 'Firefox';
+  } else if (ua.includes('chrome') && !ua.includes('chromium')) {
+    browser = 'Chrome';
+  } else if (ua.includes('safari') && !ua.includes('chrome')) {
+    browser = 'Safari';
+  } else if (ua.includes('edge')) {
+    browser = 'Edge';
+  } else if (ua.includes('opera')) {
+    browser = 'Opera';
+  }
+
+  // Detect device/OS
+  if (ua.includes('iphone')) {
+    device = 'iPhone';
+  } else if (ua.includes('ipad')) {
+    device = 'iPad';
+  } else if (ua.includes('android')) {
+    device = 'Android';
+  } else if (ua.includes('windows')) {
+    device = 'Windows PC';
+  } else if (ua.includes('macintosh')) {
+    device = 'Mac';
+  } else if (ua.includes('linux')) {
+    device = 'Linux PC';
+  }
+
+  return { browser, device };
+}
+
 
 export const register = async (req: Request, res: Response) => {
   try {
@@ -171,11 +210,19 @@ export const login = async (req: Request, res: Response) => {
 
     // Verify Password or PIN
     let valid = false;
-    if (targetuser_role === 'consumer') {
-      if (user.pin && pin && await comparePassword(pin, user.pin)) valid = true;
-      else if (user.password && password && await comparePassword(password, user.password)) valid = true;
+    if (user.isFirstLogin) {
+      // Must validate only the temporary password (which is stored in user.password)
+      const inputPass = (targetuser_role === 'consumer' && pin) ? pin : password;
+      if (inputPass && user.password && await comparePassword(inputPass, user.password)) {
+        valid = true;
+      }
     } else {
-      if (user.password && await comparePassword(password, user.password)) valid = true;
+      if (targetuser_role === 'consumer') {
+        if (user.pin && pin && await comparePassword(pin, user.pin)) valid = true;
+        else if (user.password && password && await comparePassword(password, user.password)) valid = true;
+      } else {
+        if (user.password && await comparePassword(password, user.password)) valid = true;
+      }
     }
 
     if (!valid) {
@@ -246,18 +293,70 @@ export const login = async (req: Request, res: Response) => {
 
     // Notify Wholesaler of Suspicious Activity (WHO-EMAIL-015)
     if (user.role === 'wholesaler' && user.email) {
-      await emailQueue.add('suspicious-activity-alert', {
-        to: user.email,
-        templateType: 'wholesaler-suspicious-activity', // Mapped to WHO-EMAIL-015
-        data: {
-          wholesaler_name: user.name || 'Wholesaler',
-          activity: 'Unusual account login detected',
-          time: new Date().toLocaleString(),
-          location: req.ip || 'Unknown',
-          security_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/wholesaler/security`
-        },
-        relatedEntity: { type: 'USER', id: user.id.toString() }
+      const userAgent = req.headers['user-agent'] || 'Unknown Device';
+      const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string) || 'Unknown';
+      const { browser, device } = parseUserAgent(userAgent);
+
+      // Get previous logins
+      const previousLogins = await (prisma as any).wholesalerLogin.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'desc' },
+        take: 50
       });
+
+      let isUnusual = false;
+      let unusualReason = 'Unusual account login detected';
+
+      if (previousLogins.length > 0) {
+        const knownIPs = new Set(previousLogins.map(l => l.ipAddress));
+        const knownDevices = new Set(previousLogins.map(l => l.device));
+        const knownBrowsers = new Set(previousLogins.map(l => l.browser));
+
+        const isNewIP = !knownIPs.has(ipAddress);
+        const isNewDevice = !knownDevices.has(device);
+        const isNewBrowser = !knownBrowsers.has(browser);
+
+        // Login rate limits
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const recentLoginsCount = previousLogins.filter(l => new Date(l.createdAt) > tenMinutesAgo).length;
+        const isHighFrequency = recentLoginsCount >= 5;
+
+        if (isNewIP || isNewDevice || isNewBrowser || isHighFrequency) {
+          isUnusual = true;
+          const reasons = [];
+          if (isNewIP) reasons.push('new IP address');
+          if (isNewDevice) reasons.push('new device');
+          if (isNewBrowser) reasons.push('new browser');
+          if (isHighFrequency) reasons.push('suspicious login frequency');
+          unusualReason = `Unusual login detected: ${reasons.join(', ')}`;
+        }
+      }
+
+      // Record this login
+      await (prisma as any).wholesalerLogin.create({
+        data: {
+          userId: user.id,
+          ipAddress,
+          userAgent,
+          device,
+          browser
+        }
+      });
+
+      if (isUnusual) {
+        await emailQueue.add('suspicious-activity-alert', {
+          to: user.email,
+          templateType: 'wholesaler-suspicious-activity', // Mapped to WHO-EMAIL-015
+          data: {
+            wholesaler_name: user.name || 'Wholesaler',
+            activity: unusualReason,
+            time: new Date().toLocaleString(),
+            location: ipAddress,
+            security_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/wholesaler/security`
+          },
+          relatedEntity: { type: 'USER', id: user.id.toString() }
+        });
+      }
     }
 
     // Format Response

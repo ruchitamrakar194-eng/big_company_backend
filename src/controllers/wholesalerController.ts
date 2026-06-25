@@ -1196,7 +1196,7 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
 
         if (existingProduct) {
           // Update existing stock and ensure it's active
-          const conversionFactor = existingProduct.conversionFactor ? Number(existingProduct.conversionFactor) : null;
+          const conversionFactor = (existingProduct as any).conversionFactor ? Number((existingProduct as any).conversionFactor) : null;
           let addStock = item.quantity;
           if (conversionFactor && conversionFactor > 0) {
             addStock = item.quantity * conversionFactor;

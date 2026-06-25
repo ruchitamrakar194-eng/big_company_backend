@@ -378,10 +378,14 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                         stock: { increment: incrementStock },
                         costPrice: item.price,
                         status: 'active',
+<<<<<<< HEAD
                         barcode: sourceProduct.barcode, // Ensure barcode is set/updated
                         baseUnit: existingProduct.baseUnit || sourceProduct.baseUnit,
                         purchaseUnit: existingProduct.purchaseUnit || sourceProduct.purchaseUnit,
                         conversionFactor: existingProduct.conversionFactor || sourceProduct.conversionFactor,
+=======
+                        barcode: sourceProduct.barcode // Ensure barcode is set/updated
+>>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
                     };
                     if (!existingProduct.retailerId) {
                         updateData.retailerId = retailerProfile.id;
@@ -454,10 +458,14 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 category: category || 'General',
                 price: parseFloat(price),
                 costPrice: costPrice ? parseFloat(costPrice) : undefined,
+<<<<<<< HEAD
                 stock: finalStock,
                 baseUnit,
                 purchaseUnit,
                 conversionFactor: parsedConversionFactor,
+=======
+                stock: stock ? parseFloat(stock) : 0,
+>>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
                 image: imageUrl,
                 retailerId: retailerProfile.id,
                 barcode: sku // Save sku as barcode for manual entry POS scanning
@@ -504,9 +512,12 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 price: price ? parseFloat(price) : undefined,
                 costPrice: costPrice ? parseFloat(costPrice) : undefined,
                 stock: stock !== undefined ? parseFloat(stock) : undefined,
+<<<<<<< HEAD
                 baseUnit,
                 purchaseUnit,
                 conversionFactor: conversionFactor ? parseFloat(conversionFactor) : null,
+=======
+>>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
                 image: imageUrl,
                 sku: sku !== undefined ? sku : undefined,
                 barcode: sku !== undefined ? sku : undefined // Update barcode with sku
@@ -811,6 +822,7 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const { items, payment_method, // 'cash', 'nfc', 'wallet', 'momo'
         subtotal, tax_amount, discount, customer_phone, payment_details // { pin, uid } for NFC
          } = req.body;
+<<<<<<< HEAD
         const total = (subtotal + tax_amount - (discount || 0));
         // --- Module 5: The Sales Discount Safeguard System ---
         if (discount && discount > 0 && subtotal > 0) {
@@ -824,6 +836,9 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             }
         }
         // --- End Module 5 ---
+=======
+        const total = (subtotal - (discount || 0));
+>>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
         // 1. Validate items and stock
         const productIds = items.map((item) => Number(item.product_id));
         const products = yield prisma_1.default.product.findMany({
@@ -1019,8 +1034,10 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                     }
                 }
                 if (totalProfit > 0) {
+                    const config = yield prisma.systemConfig.findFirst();
+                    const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || 6500;
                     const rewardAmountRWF = totalProfit * 0.12; // 12% of profit
-                    const rewardUnits = Number((rewardAmountRWF / 6500).toFixed(4));
+                    const rewardUnits = Number((rewardAmountRWF / gasPrice).toFixed(4));
                     yield prisma.gasReward.create({
                         data: {
                             consumerId: consumerId,
@@ -1319,9 +1336,11 @@ const getDailySales = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 saleId: { in: todaySales.map(s => s.id) }
             }
         });
+        const config = yield prisma_1.default.systemConfig.findFirst();
+        const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || 6500;
         const gasRewardsM3 = todayGasRewards.reduce((sum, r) => sum + r.units, 0);
         const gasRewardsRwf = todayGasRewards.reduce((sum, r) => {
-            const rwf = r.profitAmount != null ? r.profitAmount * 0.12 : r.units * 6500;
+            const rwf = r.units * gasPrice;
             return sum + rwf;
         }, 0);
         res.json({
