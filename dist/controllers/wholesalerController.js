@@ -45,10 +45,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailer = exports.getLinkedRetailers = exports.rejectLinkRequest = exports.approveLinkRequest = exports.getLinkRequests = exports.rejectCreditRequest = exports.approveCreditRequest = exports.getCreditRequests = exports.confirmDelivery = exports.shipOrder = exports.rejectOrder = exports.confirmOrder = exports.getOrderStats = exports.updateOrderStatus = exports.getOrder = exports.getRetailerOrders = exports.deleteProduct = exports.updatePrice = exports.updateStock = exports.updateProduct = exports.createProduct = exports.getCategories = exports.getInventoryStats = exports.getInventory = exports.getDashboardStats = void 0;
+exports.generateUniqueBarcode = exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailer = exports.getLinkedRetailers = exports.rejectLinkRequest = exports.approveLinkRequest = exports.getLinkRequests = exports.rejectCreditRequest = exports.approveCreditRequest = exports.getCreditRequests = exports.confirmDelivery = exports.shipOrder = exports.rejectOrder = exports.confirmOrder = exports.getOrderStats = exports.updateOrderStatus = exports.getOrder = exports.getRetailerOrders = exports.deleteProduct = exports.updatePrice = exports.updateStock = exports.updateProduct = exports.createProduct = exports.getCategories = exports.getInventoryStats = exports.getInventory = exports.getDashboardStats = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const cloudinary_1 = require("../utils/cloudinary");
 const email_queue_1 = require("../queues/email.queue");
+const pricingUtils_1 = require("../utils/pricingUtils");
 // Get dashboard stats with comprehensive calculations
 const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -364,27 +365,39 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         // Extract fields from request body (matching frontend field names)
         const { name, description, sku, category, wholesale_price, // Frontend sends wholesale_price
         cost_price, // Frontend sends cost_price
-        stock, unit, low_stock_threshold, invoice_number, barcode, image // Base64 string from frontend
-         } = req.body;
+        stock, unit, low_stock_threshold, invoice_number, barcode, image, // Base64 string from frontend
+        taxType, supplierCost, baseUnit, purchaseUnit, conversionFactor } = req.body;
         // Validate required fields
-        if (!name || !category || !wholesale_price) {
+        if (!name || !category || !barcode || !supplierCost) {
             console.error('❌ Missing required fields');
             return res.status(400).json({
                 error: 'Missing required fields',
-                required: ['name', 'category', 'wholesale_price'],
-                received: { name, category, wholesale_price }
+                required: ['name', 'category', 'barcode', 'supplierCost'],
+                received: { name, category, barcode, supplierCost }
             });
         }
-        // Validate wholesale_price is a valid number
-        const parsedPrice = parseFloat(wholesale_price);
-        if (isNaN(parsedPrice) || parsedPrice < 0) {
+        // Validate barcode uniqueness
+        if (barcode) {
+            const duplicateBarcode = yield prisma_1.default.product.findFirst({
+                where: { barcode: barcode.trim() }
+            });
+            if (duplicateBarcode) {
+                console.error('❌ Duplicate barcode:', barcode);
+                return res.status(400).json({
+                    error: 'A product with this barcode already exists in the platform.'
+                });
+            }
+        }
+        // Validate wholesale_price is a valid number if provided (legacy support)
+        const parsedPrice = wholesale_price ? parseFloat(wholesale_price) : 0;
+        if (wholesale_price && (isNaN(parsedPrice) || parsedPrice < 0)) {
             console.error('❌ Invalid wholesale_price:', wholesale_price);
             return res.status(400).json({
                 error: 'Invalid wholesale price',
                 details: 'Wholesale price must be a positive number'
             });
         }
-        // Parse optional cost_price
+        // Parse optional cost_price (kept for legacy support, but supplierCost is primary)
         const parsedCostPrice = cost_price ? parseFloat(cost_price) : undefined;
         if (cost_price && (isNaN(parsedCostPrice) || parsedCostPrice < 0)) {
             console.error('❌ Invalid cost_price:', cost_price);
@@ -393,13 +406,25 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 details: 'Cost price must be a positive number'
             });
         }
+        // Validate taxType
+        const validTaxTypes = ['A', 'B', 'C', 'D'];
+        const parsedTaxType = taxType && validTaxTypes.includes(taxType) ? taxType : 'B';
+        // Parse supplierCost
+        const parsedSupplierCost = supplierCost ? parseFloat(supplierCost) : undefined;
+        if (supplierCost && (isNaN(parsedSupplierCost) || parsedSupplierCost < 0)) {
+            console.error('❌ Invalid supplierCost:', supplierCost);
+            return res.status(400).json({
+                error: 'Invalid supplier cost',
+                details: 'Supplier cost must be a positive number'
+            });
+        }
         // Parse stock
-        const parsedStock = stock ? parseInt(stock) : 0;
+        const parsedStock = stock ? parseFloat(stock) : 0;
         if (stock && (isNaN(parsedStock) || parsedStock < 0)) {
             console.error('❌ Invalid stock:', stock);
             return res.status(400).json({
                 error: 'Invalid stock',
-                details: 'Stock must be a non-negative integer'
+                details: 'Stock must be a non-negative number'
             });
         }
         // Parse optional low_stock_threshold
@@ -411,12 +436,22 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 details: 'Low stock threshold must be a non-negative integer'
             });
         }
+        // Fetch SystemConfig for pricing pipeline
+        const config = yield prisma_1.default.systemConfig.findFirst();
+        const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
+        const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
+        // Apply Module 2 Pricing Pipeline if supplierCost is present
+        let finalCalculatedPrice = parsedPrice;
+        if (parsedSupplierCost !== undefined) {
+            const pricingResult = (0, pricingUtils_1.calculateWholesalePrice)(parsedSupplierCost, wholesalerMarkupPct, parsedTaxType, exciseDutyRatePct);
+            finalCalculatedPrice = pricingResult.finalInvoicePrice;
+        }
         console.log('📦 Creating product with data:', {
             name,
             description,
             sku,
             category,
-            price: parsedPrice,
+            price: finalCalculatedPrice,
             costPrice: parsedCostPrice,
             stock: parsedStock,
             unit,
@@ -433,21 +468,31 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
             console.log('✅ Image uploaded:', imageUrl);
         }
+        const parsedConversionFactor = conversionFactor ? parseFloat(conversionFactor) : null;
+        let finalStock = parsedStock;
+        if (parsedConversionFactor && parsedConversionFactor > 0 && purchaseUnit && baseUnit) {
+            finalStock = parsedStock * parsedConversionFactor;
+        }
         const product = yield prisma_1.default.product.create({
             data: {
                 name,
                 description,
                 sku,
                 category,
-                price: parsedPrice, // Store wholesale_price as price
+                price: finalCalculatedPrice, // Overridden by Module 2 Pricing Pipeline
                 costPrice: parsedCostPrice, // Store cost_price as costPrice
-                stock: parsedStock,
+                stock: finalStock,
                 unit,
+                baseUnit,
+                purchaseUnit,
+                conversionFactor: parsedConversionFactor,
                 lowStockThreshold: parsedLowStockThreshold,
                 invoiceNumber: invoice_number,
                 barcode,
                 wholesalerId: wholesalerProfile.id,
-                image: imageUrl || null
+                image: imageUrl || null,
+                taxType: parsedTaxType,
+                supplierCost: parsedSupplierCost
             }
         });
         console.log('✅ Product created successfully:', product.id);
@@ -467,7 +512,7 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     var _a;
     try {
         const { id } = req.params;
-        const { name, category, sku, unit, low_stock_threshold, invoice_number, barcode, description, image } = req.body;
+        const { name, category, sku, unit, low_stock_threshold, invoice_number, barcode, description, image, baseUnit, purchaseUnit, conversionFactor } = req.body;
         const wholesalerProfile = yield prisma_1.default.wholesalerProfile.findUnique({
             where: { userId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.id }
         });
@@ -481,6 +526,20 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
             console.log('✅ New image uploaded:', imageUrl);
         }
+        // Validate barcode uniqueness
+        if (barcode) {
+            const duplicateBarcode = yield prisma_1.default.product.findFirst({
+                where: {
+                    barcode: barcode.trim(),
+                    id: { not: Number(id) }
+                }
+            });
+            if (duplicateBarcode) {
+                return res.status(400).json({
+                    error: 'A product with this barcode already exists in the platform.'
+                });
+            }
+        }
         const product = yield prisma_1.default.product.update({
             where: {
                 id: Number(id),
@@ -491,6 +550,9 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 category,
                 sku,
                 unit,
+                baseUnit,
+                purchaseUnit,
+                conversionFactor: conversionFactor ? parseFloat(conversionFactor) : null,
                 lowStockThreshold: low_stock_threshold ? parseInt(low_stock_threshold) : undefined,
                 invoiceNumber: invoice_number,
                 barcode,
@@ -995,6 +1057,11 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
                     retailerProfile: { include: { user: true } }
                 }
             });
+            // Fetch SystemConfig for Retailer Inheritance Pipeline
+            const config = yield prisma_1.default.systemConfig.findFirst();
+            const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
+            const retailerMarkupPct = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
+            const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
             // 2. Update Retailer's Inventory
             for (const item of updatedOrder.orderItems) {
                 if (!item.product)
@@ -1031,16 +1098,32 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
                 }
                 if (existingProduct) {
                     // Update existing stock and ensure it's active
+                    const factor = existingProduct.conversionFactor || item.product.conversionFactor;
+                    const incrementStock = (factor && factor > 0 && (existingProduct.purchaseUnit || item.product.purchaseUnit) && (existingProduct.baseUnit || item.product.baseUnit))
+                        ? item.quantity * factor
+                        : item.quantity;
                     yield tx.product.update({
                         where: { id: existingProduct.id },
                         data: {
-                            stock: { increment: item.quantity },
-                            status: 'active'
+                            stock: { increment: incrementStock },
+                            status: 'active',
+                            baseUnit: existingProduct.baseUnit || item.product.baseUnit,
+                            purchaseUnit: existingProduct.purchaseUnit || item.product.purchaseUnit,
+                            conversionFactor: existingProduct.conversionFactor || item.product.conversionFactor,
                         }
                     });
                 }
                 else {
                     // Create new product for retailer based on wholesaler's product
+                    // Retailer Inheritance Pipeline
+                    const supplierCost = item.product.supplierCost || item.product.costPrice || 0;
+                    const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
+                    const taxType = item.product.taxType || 'B';
+                    const retailPricing = (0, pricingUtils_1.calculateRetailPrice)(cleanBaseCost, retailerMarkupPct, taxType, exciseDutyRatePct);
+                    const factor = item.product.conversionFactor;
+                    const inheritedStock = (factor && factor > 0 && item.product.purchaseUnit && item.product.baseUnit)
+                        ? item.quantity * factor
+                        : item.quantity;
                     yield tx.product.create({
                         data: {
                             name: item.product.name,
@@ -1048,13 +1131,18 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
                             sku: item.product.sku,
                             barcode: item.product.barcode,
                             category: item.product.category,
-                            price: item.product.retailerPrice || (item.product.price * 1.2), // Use configured retailer price, default to 20% markup if not set
-                            costPrice: item.product.price, // Wholesaler's price is retailer's cost
-                            stock: item.quantity,
+                            price: retailPricing.finalConsumerShelfPrice, // Module 2 generated Final Consumer Shelf Price
+                            costPrice: cleanBaseCost, // Retailer's cost basis (Taxes stripped out)
+                            stock: inheritedStock,
                             retailerId: updatedOrder.retailerId,
                             unit: item.product.unit,
+                            baseUnit: item.product.baseUnit,
+                            purchaseUnit: item.product.purchaseUnit,
+                            conversionFactor: item.product.conversionFactor,
                             image: item.product.image,
-                            status: 'active'
+                            status: 'active',
+                            taxType: taxType,
+                            supplierCost: item.product.price // The actual invoice amount they paid for the stock
                         }
                     });
                 }
@@ -1620,3 +1708,31 @@ const getSettlementInvoice = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.getSettlementInvoice = getSettlementInvoice;
+// Generate a unique barcode across the platform
+const generateUniqueBarcode = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        let isUnique = false;
+        let barcode = '';
+        let attempts = 0;
+        while (!isUnique && attempts < 100) {
+            attempts++;
+            // Generate a 12-digit random number (e.g. starting with 990 for custom generated codes)
+            const randomPart = Math.floor(100000000 + Math.random() * 900000000).toString();
+            barcode = `990${randomPart}`;
+            const existing = yield prisma_1.default.product.findFirst({
+                where: { barcode }
+            });
+            if (!existing) {
+                isUnique = true;
+            }
+        }
+        if (!isUnique) {
+            return res.status(500).json({ error: 'Could not generate a unique barcode' });
+        }
+        res.json({ barcode });
+    }
+    catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.generateUniqueBarcode = generateUniqueBarcode;

@@ -24,7 +24,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
   try {
     const { retailerId, items, paymentMethod, total, applyRewardGas, rewardGasAmount, meterId, gasRewardWalletId, phone } = req.body;
     log(`Body parsed: ${JSON.stringify({ retailerId, paymentMethod, total, phone })}`);
-    
+
     const userId = req.user!.id;
     log(`User ID from req: ${userId}`);
 
@@ -46,7 +46,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       log('Mobile money detected, importing palmKash service...');
       const palmKash = (await import('../services/palmKash.service')).default;
       log('PalmKash service imported');
-      
+
       const pmResult = await palmKash.initiatePayment({
         amount: total,
         phoneNumber: phone || (consumerProfile as any).user?.phone || '',
@@ -104,7 +104,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
 
     log('Validating rewards...');
     let shouldCalculateReward = false;
-    const targetRewardId = gasRewardWalletId || meterId;
+    let targetRewardId = gasRewardWalletId || meterId;
     log(`Target Reward ID: ${targetRewardId}`);
 
     if (paymentMethod === 'credit_wallet') {
@@ -128,12 +128,13 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const rewardConsumer = await prisma.consumerProfile.findFirst({
         where: { gasRewardWalletId: gasRewardWalletId }
       });
-      if (!rewardConsumer) {
-        log('Gas Reward Wallet ID not found!');
-        return res.status(400).json({ success: false, error: 'Invalid Gas Reward Wallet ID. No account found with this ID.' });
+      if (rewardConsumer) {
+        rewardConsumerId = rewardConsumer.id;
+        log(`Reward will be credited to consumer ID: ${rewardConsumerId}`);
+      } else {
+        log(`Gas Reward Wallet ID ${gasRewardWalletId} is invalid, defaulting to shopper's own account: ${rewardConsumerId}`);
+        targetRewardId = consumerProfile.gasRewardWalletId || meterId;
       }
-      rewardConsumerId = rewardConsumer.id;
-      log(`Reward will be credited to consumer ID: ${rewardConsumerId}`);
     }
 
     log('Calculating amount to pay...');
@@ -352,7 +353,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       // 4. CREDIT GAS REWARDS
       if (shouldCalculateReward) {
         console.log('Calculating gas rewards...');
-        
+
         // Calculate Profit from items using product costPrice (wholesaler price)
         const productIds = items.map((item: any) => Number(item.productId));
         const products = await tx.product.findMany({
@@ -635,7 +636,7 @@ export const getProducts = async (req: AuthRequest, res: Response) => {
 
     if (category) where.category = category as string;
     if (search) where.name = { contains: search as string };
-    
+
     // Only show active products to consumers
     where.status = 'active';
 
@@ -849,7 +850,7 @@ export const cancelOrder = async (req: AuthRequest, res: Response) => {
       await prisma.$transaction(async (tx) => {
         await tx.sale.update({
           where: { id: Number(id) },
-          data: { 
+          data: {
             status: 'cancelled',
             cancellationReason: reason
           }
@@ -875,7 +876,7 @@ export const cancelOrder = async (req: AuthRequest, res: Response) => {
       }
       await prisma.customerOrder.update({
         where: { id: Number(id) },
-        data: { 
+        data: {
           status: 'cancelled',
           cancellationReason: reason
         }
@@ -909,8 +910,8 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
 
     // Status check: Can only confirm if it was ready or shipped
     if (!['ready', 'shipped'].includes(sale.status)) {
-      return res.status(400).json({ 
-        error: `Only orders in 'Shipped' or 'Ready' status can be confirmed for delivery. Current status: ${sale.status}` 
+      return res.status(400).json({
+        error: `Only orders in 'Shipped' or 'Ready' status can be confirmed for delivery. Current status: ${sale.status}`
       });
     }
 
@@ -1026,15 +1027,45 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
         }
       });
       const paidAmount = repayments.reduce((sum, t) => sum + t.amount, 0);
-      
+
       const rate = Number(rates.customerInterestRate) || 10;
       const interestAmount = Math.round(loan.amount * (rate / 100));
       const totalRepayable = loan.amount + interestAmount;
-      
+
+      // Generate Schedule (Synthetic 4 weeks)
+      const schedule = [];
+      const weeks = 4;
+      const weeklyAmount = totalRepayable / weeks;
+      let runningPaid = paidAmount;
+
+      for (let i = 1; i <= weeks; i++) {
+        const dueDate = new Date(loan.createdAt);
+        dueDate.setDate(dueDate.getDate() + (i * 7));
+
+        let status = 'upcoming';
+        if (runningPaid >= weeklyAmount) {
+          status = 'paid';
+          runningPaid -= weeklyAmount;
+        } else if (runningPaid > 0) {
+          status = new Date() > dueDate ? 'overdue' : 'upcoming';
+          runningPaid = 0;
+        } else {
+          status = new Date() > dueDate ? 'overdue' : 'upcoming';
+        }
+
+        schedule.push({
+          date: dueDate.toISOString(),
+          amount: weeklyAmount,
+          status
+        });
+      }
+
       return {
         ...loan,
         paidAmount,
         interestAmount,
+        interest_rate: rate,
+        schedule,
         totalRepayable,
         remainingBalance: Math.max(0, totalRepayable - paidAmount)
       };
@@ -1152,26 +1183,26 @@ export const repayLoan = async (req: AuthRequest, res: Response) => {
     // ==========================================
     let externalRef = null;
     if (payment_method === 'mobile_money' || payment_method === 'momo' || payment_method === 'airtel' || payment_method === 'airtel' || payment_method === 'airtel') {
-        const palmKash = (await import('../services/palmKash.service')).default;
-        const pmResult = await palmKash.initiatePayment({
-            amount: parseFloat(amount),
-            phoneNumber: (consumerProfile as any).user?.phone || req.body.phone || '',
-            referenceId: `CREPAY-${Date.now()}`,
-            description: `Loan Repayment for Loan #${id}`
-        });
+      const palmKash = (await import('../services/palmKash.service')).default;
+      const pmResult = await palmKash.initiatePayment({
+        amount: parseFloat(amount),
+        phoneNumber: (consumerProfile as any).user?.phone || req.body.phone || '',
+        referenceId: `CREPAY-${Date.now()}`,
+        description: `Loan Repayment for Loan #${id}`
+      });
 
-        if (!pmResult.success) {
-            return res.status(400).json({ success: false, error: pmResult.error });
-        }
-        externalRef = pmResult.transactionId;
+      if (!pmResult.success) {
+        return res.status(400).json({ success: false, error: pmResult.error });
+      }
+      externalRef = pmResult.transactionId;
     }
 
     // Move validation OUTSIDE transaction to avoid multiple response headers being sent
     if (payment_method === 'wallet') {
       const dashboardWallet = await prisma.wallet.findFirst({
-        where: { 
-          consumerId: consumerProfile.id, 
-          type: { in: ['dashboard_wallet', 'main'] } 
+        where: {
+          consumerId: consumerProfile.id,
+          type: { in: ['dashboard_wallet', 'main'] }
         }
       });
 
@@ -1208,9 +1239,9 @@ export const repayLoan = async (req: AuthRequest, res: Response) => {
       // 1. Handle Wallet Payment
       if (payment_method === 'wallet') {
         const dashboardWallet = await prisma.wallet.findFirst({
-          where: { 
-            consumerId: consumerProfile.id, 
-            type: { in: ['dashboard_wallet', 'main'] } 
+          where: {
+            consumerId: consumerProfile.id,
+            type: { in: ['dashboard_wallet', 'main'] }
           }
         });
 
@@ -1288,7 +1319,7 @@ export const repayLoan = async (req: AuthRequest, res: Response) => {
       });
 
       const totalPaid = repayments.reduce((sum, t) => sum + t.amount, 0);
-      
+
       const rate = Number(rates.customerInterestRate) || 10;
       const interestAmount = Math.round(loan.amount * (rate / 100));
       const totalRepayable = loan.amount + interestAmount;

@@ -302,7 +302,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Retailer profile not found' });
     }
 
-    const { invoice_number, name, description, sku, category, price, costPrice, stock, image } = req.body;
+    const { invoice_number, name, description, sku, category, price, costPrice, stock, image, baseUnit, purchaseUnit, conversionFactor, taxType } = req.body;
 
     // --- Invoice Flow ---
     if (invoice_number) {
@@ -367,10 +367,21 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
           }
         });
 
+        const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+        const taxType = sourceProduct.taxType || 'B';
+        const reversedCost = reverseVATCalculation(item.price, taxType);
+        const cleanCost = reversedCost.cleanBaseCost;
+
         if (existingProduct) {
+          const conversionFactor = (existingProduct as any).conversionFactor ? Number((existingProduct as any).conversionFactor) : null;
+          let addStock = item.quantity;
+          if (conversionFactor && conversionFactor > 0) {
+            addStock = item.quantity * conversionFactor;
+          }
+
           const updateData: any = {
-            stock: { increment: item.quantity },
-            costPrice: item.price,
+            stock: { increment: addStock },
+            costPrice: cleanCost,
             status: 'active',
             barcode: sourceProduct.barcode // Ensure barcode is set/updated
           };
@@ -384,6 +395,12 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
           updatedProducts.push(updatedProduct);
         } else {
           // Create new inventory item
+          const conversionFactor = (sourceProduct as any).conversionFactor ? Number((sourceProduct as any).conversionFactor) : null;
+          let addStock = item.quantity;
+          if (conversionFactor && conversionFactor > 0) {
+            addStock = item.quantity * conversionFactor;
+          }
+
           const newProduct = await prisma.product.create({
             data: {
               name: sourceProduct.name,
@@ -391,15 +408,18 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
               sku: sourceProduct.sku,
               category: sourceProduct.category,
               price: sourceProduct.retailerPrice || (sourceProduct.price * 1.2), // Default markup 20% if no retailerPrice set
-              costPrice: item.price, // Cost is what they paid in the order
-              stock: item.quantity,
+              costPrice: cleanCost, // Cost is what they paid in the order, reversed pre-tax
+              stock: addStock,
               unit: sourceProduct.unit,
+              baseUnit: (sourceProduct as any).baseUnit,
+              purchaseUnit: (sourceProduct as any).purchaseUnit,
+              conversionFactor: (sourceProduct as any).conversionFactor,
               invoiceNumber: invoice_number,
               retailerId: retailerProfile.id,
               image: sourceProduct.image,
               status: 'active',
               barcode: sourceProduct.barcode // Save wholesaler's barcode
-            }
+            } as any
           });
           createdProducts.push(newProduct);
         }
@@ -428,6 +448,19 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+    let cleanCostPrice = costPrice ? parseFloat(costPrice) : undefined;
+    if (cleanCostPrice !== undefined) {
+      const reversed = reverseVATCalculation(cleanCostPrice, taxType || 'B');
+      cleanCostPrice = reversed.cleanBaseCost;
+    }
+
+    const parsedConversion = conversionFactor ? parseFloat(conversionFactor) : null;
+    let calculatedStock = stock ? parseFloat(stock) : 0;
+    if (parsedConversion && parsedConversion > 0) {
+      calculatedStock = calculatedStock * parsedConversion;
+    }
+
     const product = await prisma.product.create({
       data: {
         name,
@@ -435,12 +468,16 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
         sku,
         category: category || 'General',
         price: parseFloat(price),
-        costPrice: costPrice ? parseFloat(costPrice) : undefined,
-        stock: stock ? parseFloat(stock) : 0,
+        costPrice: cleanCostPrice,
+        stock: calculatedStock,
         image: imageUrl,
         retailerId: retailerProfile.id,
-        barcode: sku // Save sku as barcode for manual entry POS scanning
-      }
+        barcode: sku, // Save sku as barcode for manual entry POS scanning
+        baseUnit,
+        purchaseUnit,
+        conversionFactor: parsedConversion,
+        taxType: taxType || 'B'
+      } as any
     });
 
     res.json({ success: true, product });
@@ -454,7 +491,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
 export const updateProduct = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, description, category, price, costPrice, stock, image, sku } = req.body;
+    const { name, description, category, price, costPrice, stock, image, sku, baseUnit, purchaseUnit, conversionFactor, taxType } = req.body;
 
     // Validate SKU uniqueness
     if (sku) {
@@ -477,6 +514,26 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
       imageUrl = await uploadImage(image);
     }
 
+    const currentProduct = await prisma.product.findUnique({ where: { id: Number(id) } });
+
+    let cleanCostPrice = costPrice !== undefined ? parseFloat(costPrice) : undefined;
+    if (cleanCostPrice !== undefined && cleanCostPrice !== null) {
+      const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+      const resolvedTaxType = taxType || currentProduct?.taxType || 'B';
+      const reversed = reverseVATCalculation(cleanCostPrice, resolvedTaxType);
+      cleanCostPrice = reversed.cleanBaseCost;
+    }
+
+    const parsedConversion = conversionFactor !== undefined ? (conversionFactor ? parseFloat(conversionFactor) : null) : undefined;
+    let calculatedStock = stock !== undefined ? parseFloat(stock) : undefined;
+    // If updating stock manually and conversion factor is provided (either updated or existing)
+    if (calculatedStock !== undefined) {
+      const activeConversion = parsedConversion !== undefined ? parsedConversion : (currentProduct as any)?.conversionFactor;
+      if (activeConversion && activeConversion > 0) {
+        calculatedStock = calculatedStock * activeConversion;
+      }
+    }
+
     const product = await prisma.product.update({
       where: { id: Number(id) },
       data: {
@@ -484,12 +541,16 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
         description,
         category,
         price: price ? parseFloat(price) : undefined,
-        costPrice: costPrice ? parseFloat(costPrice) : undefined,
-        stock: stock !== undefined ? parseFloat(stock) : undefined,
+        costPrice: cleanCostPrice,
+        stock: calculatedStock,
         image: imageUrl,
         sku: sku !== undefined ? sku : undefined,
-        barcode: sku !== undefined ? sku : undefined // Update barcode with sku
-      }
+        barcode: sku !== undefined ? sku : undefined, // Update barcode with sku
+        baseUnit: baseUnit !== undefined ? baseUnit : undefined,
+        purchaseUnit: purchaseUnit !== undefined ? purchaseUnit : undefined,
+        conversionFactor: parsedConversion,
+        taxType: taxType !== undefined ? taxType : undefined
+      } as any
     });
 
     res.json({ success: true, product });
@@ -825,6 +886,21 @@ export const createSale = async (req: AuthRequest, res: Response) => {
     } = req.body;
 
     const total = (subtotal + tax_amount - (discount || 0));
+
+    // --- Module 5: The Sales Discount Safeguard System ---
+    if (discount && discount > 0 && subtotal > 0) {
+      const config = await prisma.systemConfig.findFirst();
+      const maxDiscountPct = config?.maxDiscountPercentage || 5; // Default safety floor of 5%
+
+      const requestedDiscountPct = (discount / subtotal) * 100;
+
+      if (requestedDiscountPct > maxDiscountPct) {
+        return res.status(400).json({
+          error: `Discount Blocked: The requested discount of ${requestedDiscountPct.toFixed(1)}% exceeds the Admin-approved maximum limit of ${maxDiscountPct}%. Transaction locked.`
+        });
+      }
+    }
+    // --- End Module 5 ---
 
     // 1. Validate items and stock
     const productIds = items.map((item: any) => Number(item.product_id));

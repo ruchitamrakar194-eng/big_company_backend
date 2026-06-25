@@ -136,7 +136,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         }
         log('Validating rewards...');
         let shouldCalculateReward = false;
-        const targetRewardId = gasRewardWalletId || meterId;
+        let targetRewardId = gasRewardWalletId || meterId;
         log(`Target Reward ID: ${targetRewardId}`);
         if (paymentMethod === 'credit_wallet') {
             log('Credit wallet payment, no rewards');
@@ -158,12 +158,14 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const rewardConsumer = yield prisma_1.default.consumerProfile.findFirst({
                 where: { gasRewardWalletId: gasRewardWalletId }
             });
-            if (!rewardConsumer) {
-                log('Gas Reward Wallet ID not found!');
-                return res.status(400).json({ success: false, error: 'Invalid Gas Reward Wallet ID. No account found with this ID.' });
+            if (rewardConsumer) {
+                rewardConsumerId = rewardConsumer.id;
+                log(`Reward will be credited to consumer ID: ${rewardConsumerId}`);
             }
-            rewardConsumerId = rewardConsumer.id;
-            log(`Reward will be credited to consumer ID: ${rewardConsumerId}`);
+            else {
+                log(`Gas Reward Wallet ID ${gasRewardWalletId} is invalid, defaulting to shopper's own account: ${rewardConsumerId}`);
+                targetRewardId = consumerProfile.gasRewardWalletId || meterId;
+            }
         }
         log('Calculating amount to pay...');
         let amountToPay = total;
@@ -997,8 +999,34 @@ const getLoans = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             const rate = Number(rates.customerInterestRate) || 10;
             const interestAmount = Math.round(loan.amount * (rate / 100));
             const totalRepayable = loan.amount + interestAmount;
+            // Generate Schedule (Synthetic 4 weeks)
+            const schedule = [];
+            const weeks = 4;
+            const weeklyAmount = totalRepayable / weeks;
+            let runningPaid = paidAmount;
+            for (let i = 1; i <= weeks; i++) {
+                const dueDate = new Date(loan.createdAt);
+                dueDate.setDate(dueDate.getDate() + (i * 7));
+                let status = 'upcoming';
+                if (runningPaid >= weeklyAmount) {
+                    status = 'paid';
+                    runningPaid -= weeklyAmount;
+                }
+                else if (runningPaid > 0) {
+                    status = new Date() > dueDate ? 'overdue' : 'upcoming';
+                    runningPaid = 0;
+                }
+                else {
+                    status = new Date() > dueDate ? 'overdue' : 'upcoming';
+                }
+                schedule.push({
+                    date: dueDate.toISOString(),
+                    amount: weeklyAmount,
+                    status
+                });
+            }
             return Object.assign(Object.assign({}, loan), { paidAmount,
-                interestAmount,
+                interestAmount, interest_rate: rate, schedule,
                 totalRepayable, remainingBalance: Math.max(0, totalRepayable - paidAmount) });
         })));
         const totalOutstanding = enrichedLoans

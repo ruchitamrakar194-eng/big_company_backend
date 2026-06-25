@@ -2509,7 +2509,11 @@ export const getSystemConfig = async (req: AuthRequest, res: Response) => {
           minWalletTopup: 500,
           maxWalletTopup: 500000,
           maxDailyTransaction: 1000000,
-          maxCreditLimit: 500000
+          maxCreditLimit: 500000,
+          wholesalerMarkup: 20,
+          retailerMarkup: 20,
+          maxDiscountPercentage: 5,
+          exciseDutyRate: 10
         }
       });
     }
@@ -3387,6 +3391,13 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
         }
       });
 
+      // Fetch SystemConfig for Retailer Inheritance Pipeline
+      const config = await prisma.systemConfig.findFirst();
+      const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
+      const retailerMarkupPct = config?.retailerMarkup || 20;
+      const exciseDutyRatePct = config?.exciseDutyRate || 10;
+      const { calculateRetailPrice } = await import('../utils/pricingUtils');
+
       // 2. Update Retailer's Inventory
       for (const item of updatedOrder.orderItems) {
         if (!item.product) continue;
@@ -3405,12 +3416,37 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
 
         if (existingProduct) {
           // Update existing stock
+          const conversionFactor = existingProduct.conversionFactor ? Number(existingProduct.conversionFactor) : null;
+          let addStock = item.quantity;
+          if (conversionFactor && conversionFactor > 0) {
+            addStock = item.quantity * conversionFactor;
+          }
+
           await tx.product.update({
             where: { id: existingProduct.id },
-            data: { stock: { increment: item.quantity } }
+            data: { stock: { increment: addStock } }
           });
         } else {
           // Create new product for retailer based on wholesaler's product
+
+          // Retailer Inheritance Pipeline
+          const supplierCost = item.product.supplierCost || item.product.costPrice || 0;
+          const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
+          const taxType = item.product.taxType || 'B';
+
+          const retailPricing = calculateRetailPrice(
+            cleanBaseCost,
+            retailerMarkupPct,
+            taxType,
+            exciseDutyRatePct
+          );
+
+          const conversionFactor = item.product.conversionFactor ? Number(item.product.conversionFactor) : null;
+          let addStock = item.quantity;
+          if (conversionFactor && conversionFactor > 0) {
+            addStock = item.quantity * conversionFactor;
+          }
+
           await tx.product.create({
             data: {
               name: item.product.name,
@@ -3418,12 +3454,17 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
               sku: item.product.sku,
               barcode: item.product.barcode,
               category: item.product.category,
-              price: item.product.price * 1.2, // Default 20% markup for retailer if new
-              costPrice: item.product.price,
-              stock: item.quantity,
+              price: retailPricing.finalConsumerShelfPrice, // Module 2 generated Final Consumer Shelf Price
+              costPrice: cleanBaseCost,                     // Retailer's cost basis (Taxes stripped out)
+              stock: addStock,
               retailerId: updatedOrder.retailerId,
               unit: item.product.unit,
-              status: 'active'
+              baseUnit: item.product.baseUnit,
+              purchaseUnit: item.product.purchaseUnit,
+              conversionFactor: item.product.conversionFactor,
+              status: 'active',
+              taxType: taxType,
+              supplierCost: item.product.price              // The actual invoice amount they paid for the stock
             }
           });
         }

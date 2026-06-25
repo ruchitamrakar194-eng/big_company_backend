@@ -54,10 +54,17 @@ export class SMSService {
     try {
       console.log(`📱 [SMSService] Sending SMS to ${normalizedTo}...`);
 
+      let dynamicSenderId = senderId;
+      if (normalizedTo.startsWith('25078') || normalizedTo.startsWith('25079')) {
+        dynamicSenderId = 'BIG LTD';
+      } else if (normalizedTo.startsWith('25072') || normalizedTo.startsWith('25073')) {
+        dynamicSenderId = 'BIG_LTD';
+      }
+
       const postData = new URLSearchParams({
         recipients: normalizedTo,
         message: message,
-        sender: senderId,
+        sender: dynamicSenderId,
         ...(dlrUrl && { dlrurl: dlrUrl })
       });
 

@@ -322,14 +322,27 @@ export const redeemRewards = async (req: AuthRequest, res: Response) => {
 };
 
 // Send rewards to meter POINTER
-// Send gas rewards to a meter
 export const sendToMeter = async (req: AuthRequest, res: Response) => {
     try {
         const { meterId, amount, meterType } = req.body;
 
-        if (!meterId || !amount) {
+        if (!meterId || amount === undefined || amount === null) {
             return res.status(400).json({ success: false, error: 'Meter ID and amount are required.' });
         }
+
+        const parsedAmount = Number(amount);
+        if (isNaN(parsedAmount) || parsedAmount <= 0) {
+            return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
+        }
+
+        // Apply strict round-down rule to 1 decimal place
+        const roundedAmount = Math.floor(parsedAmount * 10) / 10;
+
+        // Apply minimum transfer limit check of 0.1 m³
+        if (roundedAmount < 0.1) {
+            return res.status(400).json({ success: false, error: 'Minimum transfer amount is 0.1 m³.' });
+        }
+
         // 1. Resolve Meter (Flexible search for with/without MTR- prefix)
         const meter = await prisma.gasMeter.findFirst({
             where: {
@@ -350,7 +363,7 @@ export const sendToMeter = async (req: AuthRequest, res: Response) => {
             body: {
                 meterNumber: targetMeterNumber,
                 meterType: 'TOKEN', // Hardcoded to match frontend flow
-                amount: amount,
+                amount: roundedAmount,
                 paymentMethod: 'gas_rewards',
                 isVendByUnit: true, // Rewards are sent in m3
                 provider: meterType === 'LORA_NB' ? 'stronpower' : 'zhongyi'

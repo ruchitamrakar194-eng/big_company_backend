@@ -180,9 +180,14 @@ model Product {
   invoiceNumber     String?
   lowStockThreshold Int?
   unit              String?
+  baseUnit          String?
+  purchaseUnit      String?
+  conversionFactor  Float?
   image             String?
   status            String             @default("active")
   supplierId        Int?
+  taxType           String?            @default("B") // A, B, C, D
+  supplierCost      Float?             @default(0)
   orderItems        OrderItem[]
   retailerProfile   RetailerProfile?   @relation(fields: [retailerId], references: [id], map: "Product_retailerId_fkey")
   supplier          Supplier?          @relation(fields: [supplierId], references: [id], map: "Product_supplierId_fkey")
@@ -826,6 +831,12 @@ model SystemConfig {
   customerLoanInterest   Float @default(0)
   retailerLoanInterest   Float @default(0)
   wholesalerLoanInterest Float @default(0)
+
+  // Module 1 Core Pricing Controls
+  wholesalerMarkup       Float @default(20)
+  retailerMarkup         Float @default(20)
+  maxDiscountPercentage  Float @default(5)
+  exciseDutyRate         Float @default(10)
 
   updatedAt           DateTime @default(now()) @updatedAt
   createdAt           DateTime @default(now())

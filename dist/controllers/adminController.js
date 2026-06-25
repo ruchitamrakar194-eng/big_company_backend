@@ -1566,11 +1566,16 @@ exports.getProducts = getProducts;
 // Create product
 const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description, sku, category, price, costPrice, retailerPrice, stock, unit, lowStockThreshold, invoiceNumber, barcode, wholesalerId, retailerId, image } = req.body;
+        const { name, description, sku, category, price, costPrice, retailerPrice, stock, unit, lowStockThreshold, invoiceNumber, barcode, wholesalerId, retailerId, image, baseUnit, purchaseUnit, conversionFactor } = req.body;
         // Upload to Cloudinary if image is provided as base64
         let imageUrl = image;
         if (image && image.startsWith('data:image')) {
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
+        }
+        const parsedConversionFactor = conversionFactor ? parseFloat(conversionFactor) : null;
+        let finalStock = parseInt(stock) || 0;
+        if (parsedConversionFactor && parsedConversionFactor > 0 && purchaseUnit && baseUnit) {
+            finalStock = finalStock * parsedConversionFactor;
         }
         const product = yield prisma_1.default.product.create({
             data: {
@@ -1581,8 +1586,11 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 price: parseFloat(price),
                 costPrice: costPrice ? parseFloat(costPrice) : null,
                 retailerPrice: retailerPrice ? parseFloat(retailerPrice) : null,
-                stock: parseInt(stock) || 0,
+                stock: finalStock,
                 unit,
+                baseUnit,
+                purchaseUnit,
+                conversionFactor: parsedConversionFactor,
                 lowStockThreshold: lowStockThreshold ? parseInt(lowStockThreshold) : null,
                 invoiceNumber,
                 barcode,
@@ -1604,7 +1612,7 @@ exports.createProduct = createProduct;
 const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const { name, description, sku, category, price, costPrice, retailerPrice, unit, lowStockThreshold, invoiceNumber, barcode, status, image } = req.body;
+        const { name, description, sku, category, price, costPrice, retailerPrice, unit, lowStockThreshold, invoiceNumber, barcode, status, image, baseUnit, purchaseUnit, conversionFactor } = req.body;
         const targetProduct = yield prisma_1.default.product.findUnique({ where: { id: Number(id) } });
         if (!targetProduct) {
             return res.status(404).json({ error: 'Product not found' });
@@ -1615,6 +1623,7 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (image && image.startsWith('data:image')) {
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
         }
+        const parsedConversionFactor = conversionFactor ? parseFloat(conversionFactor) : null;
         // Update Wholesaler products (where retailerId is null)
         yield prisma_1.default.product.updateMany({
             where: Object.assign(Object.assign({}, whereClause), { retailerId: null }),
@@ -1623,7 +1632,9 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 sku,
                 category, price: price ? parseFloat(price) : undefined, costPrice: costPrice !== undefined ? (costPrice ? parseFloat(costPrice) : null) : undefined, retailerPrice: retailerPrice !== undefined ? (retailerPrice ? parseFloat(retailerPrice) : null) : undefined, 
                 // Note: stock is NOT updated here because it's managed individually by wholesalers
-                unit, lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined, invoiceNumber,
+                unit,
+                baseUnit,
+                purchaseUnit, conversionFactor: parsedConversionFactor, lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined, invoiceNumber,
                 barcode,
                 status }, (imageUrl ? { image: imageUrl } : {}))
         });
@@ -1635,7 +1646,9 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 sku,
                 category, 
                 // For retailers, Selling Price is the Retailer Price, and Cost Price is the Wholesaler Price
-                price: retailerPrice ? parseFloat(retailerPrice) : undefined, costPrice: price ? parseFloat(price) : undefined, unit, lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined, invoiceNumber,
+                price: retailerPrice ? parseFloat(retailerPrice) : undefined, costPrice: price ? parseFloat(price) : undefined, unit,
+                baseUnit,
+                purchaseUnit, conversionFactor: parsedConversionFactor, lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined, invoiceNumber,
                 barcode,
                 status }, (imageUrl ? { image: imageUrl } : {}))
         });
@@ -2289,7 +2302,11 @@ const getSystemConfig = (req, res) => __awaiter(void 0, void 0, void 0, function
                     minWalletTopup: 500,
                     maxWalletTopup: 500000,
                     maxDailyTransaction: 1000000,
-                    maxCreditLimit: 500000
+                    maxCreditLimit: 500000,
+                    wholesalerMarkup: 20,
+                    retailerMarkup: 20,
+                    maxDiscountPercentage: 5,
+                    exciseDutyRate: 10
                 }
             });
         }
@@ -3124,6 +3141,12 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
                     retailerProfile: true
                 }
             });
+            // Fetch SystemConfig for Retailer Inheritance Pipeline
+            const config = yield prisma_1.default.systemConfig.findFirst();
+            const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
+            const retailerMarkupPct = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
+            const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
+            const { calculateRetailPrice } = yield Promise.resolve().then(() => __importStar(require('../utils/pricingUtils')));
             // 2. Update Retailer's Inventory
             for (const item of updatedOrder.orderItems) {
                 if (!item.product)
@@ -3148,6 +3171,11 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
                 }
                 else {
                     // Create new product for retailer based on wholesaler's product
+                    // Retailer Inheritance Pipeline
+                    const supplierCost = item.product.supplierCost || item.product.costPrice || 0;
+                    const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
+                    const taxType = item.product.taxType || 'B';
+                    const retailPricing = calculateRetailPrice(cleanBaseCost, retailerMarkupPct, taxType, exciseDutyRatePct);
                     yield tx.product.create({
                         data: {
                             name: item.product.name,
@@ -3155,12 +3183,14 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
                             sku: item.product.sku,
                             barcode: item.product.barcode,
                             category: item.product.category,
-                            price: item.product.price * 1.2, // Default 20% markup for retailer if new
-                            costPrice: item.product.price,
+                            price: retailPricing.finalConsumerShelfPrice, // Module 2 generated Final Consumer Shelf Price
+                            costPrice: cleanBaseCost, // Retailer's cost basis (Taxes stripped out)
                             stock: item.quantity,
                             retailerId: updatedOrder.retailerId,
                             unit: item.product.unit,
-                            status: 'active'
+                            status: 'active',
+                            taxType: taxType,
+                            supplierCost: item.product.price // The actual invoice amount they paid for the stock
                         }
                     });
                 }

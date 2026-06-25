@@ -66,7 +66,14 @@ class SMSService {
                 return { success: false, error: 'Credentials missing', logId: log.id };
             try {
                 console.log(`📱 [SMSService] Sending SMS to ${normalizedTo}...`);
-                const postData = new URLSearchParams(Object.assign({ recipients: normalizedTo, message: message, sender: senderId }, (dlrUrl && { dlrurl: dlrUrl })));
+                let dynamicSenderId = senderId;
+                if (normalizedTo.startsWith('25078') || normalizedTo.startsWith('25079')) {
+                    dynamicSenderId = 'BIG LTD';
+                }
+                else if (normalizedTo.startsWith('25072') || normalizedTo.startsWith('25073')) {
+                    dynamicSenderId = 'BIG_LTD';
+                }
+                const postData = new URLSearchParams(Object.assign({ recipients: normalizedTo, message: message, sender: dynamicSenderId }, (dlrUrl && { dlrurl: dlrUrl })));
                 const response = yield axios_1.default.post(this.API_URL, postData.toString(), {
                     auth: {
                         username: username,

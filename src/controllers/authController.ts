@@ -18,15 +18,15 @@ export const register = async (req: Request, res: Response) => {
     }
 
     if (targetuser_role === 'retailer' || targetuser_role === 'wholesaler') {
-      return res.status(403).json({ 
-        error: 'Self-registration is not allowed for business accounts. Please contact a BIG Ltd administrator for onboarding.' 
+      return res.status(403).json({
+        error: 'Self-registration is not allowed for business accounts. Please contact a BIG Ltd administrator for onboarding.'
       });
     }
 
     if (phone) {
       if (!/^\+2507\d{8}$/.test(phone)) {
-        return res.status(400).json({ 
-          error: 'Phone number must start with +250 and follow the format +2507XXXXXXXX' 
+        return res.status(400).json({
+          error: 'Phone number must start with +250 and follow the format +2507XXXXXXXX'
         });
       }
     }
@@ -34,8 +34,8 @@ export const register = async (req: Request, res: Response) => {
     if (targetuser_role === 'consumer' && email) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
-        return res.status(400).json({ 
-          error: 'Invalid email format' 
+        return res.status(400).json({
+          error: 'Invalid email format'
         });
       }
     }
@@ -96,7 +96,7 @@ export const register = async (req: Request, res: Response) => {
     }
 
     const token = generateToken({ id: user.id, role: user.role });
-    
+
     // Trigger Customer Signup SMS (CUS-SMS-001)
     if (targetuser_role === 'consumer' && user.phone) {
       try {
@@ -338,7 +338,7 @@ export const updatePassword = async (req: any, res: Response) => {
     const hashedPassword = await hashPassword(new_password);
     await prisma.user.update({
       where: { id: userId },
-      data: { 
+      data: {
         password: hashedPassword,
         isFirstLogin: false,
         tempPassword: null
@@ -628,8 +628,8 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      message: deliveryChannel === 'email' 
-        ? 'Temporary password sent to email' 
+      message: deliveryChannel === 'email'
+        ? 'Temporary password sent to email'
         : 'Temporary password sent via SMS',
       ...(process.env.NODE_ENV === 'development' && { dev_temp_pass: tempPass })
     });

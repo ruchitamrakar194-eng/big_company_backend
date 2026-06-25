@@ -370,10 +370,18 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     }
                 });
                 if (existingProduct) {
+                    const factor = existingProduct.conversionFactor || sourceProduct.conversionFactor;
+                    const incrementStock = (factor && factor > 0 && (existingProduct.purchaseUnit || sourceProduct.purchaseUnit) && (existingProduct.baseUnit || sourceProduct.baseUnit))
+                        ? item.quantity * factor
+                        : item.quantity;
                     const updateData = {
-                        stock: { increment: item.quantity },
+                        stock: { increment: incrementStock },
                         costPrice: item.price,
-                        status: 'active'
+                        status: 'active',
+                        barcode: sourceProduct.barcode, // Ensure barcode is set/updated
+                        baseUnit: existingProduct.baseUnit || sourceProduct.baseUnit,
+                        purchaseUnit: existingProduct.purchaseUnit || sourceProduct.purchaseUnit,
+                        conversionFactor: existingProduct.conversionFactor || sourceProduct.conversionFactor,
                     };
                     if (!existingProduct.retailerId) {
                         updateData.retailerId = retailerProfile.id;
@@ -386,6 +394,10 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 }
                 else {
                     // Create new inventory item
+                    const factor = sourceProduct.conversionFactor;
+                    const inheritedStock = (factor && factor > 0 && sourceProduct.purchaseUnit && sourceProduct.baseUnit)
+                        ? item.quantity * factor
+                        : item.quantity;
                     const newProduct = yield prisma_1.default.product.create({
                         data: {
                             name: sourceProduct.name,
@@ -394,12 +406,16 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                             category: sourceProduct.category,
                             price: sourceProduct.retailerPrice || (sourceProduct.price * 1.2), // Default markup 20% if no retailerPrice set
                             costPrice: item.price, // Cost is what they paid in the order
-                            stock: item.quantity,
+                            stock: inheritedStock,
                             unit: sourceProduct.unit,
+                            baseUnit: sourceProduct.baseUnit,
+                            purchaseUnit: sourceProduct.purchaseUnit,
+                            conversionFactor: sourceProduct.conversionFactor,
                             invoiceNumber: invoice_number,
                             retailerId: retailerProfile.id,
                             image: sourceProduct.image,
-                            status: 'active'
+                            status: 'active',
+                            barcode: sourceProduct.barcode // Save wholesaler's barcode
                         }
                     });
                     createdProducts.push(newProduct);
@@ -407,7 +423,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
             return res.json({ success: true, count: createdProducts.length + updatedProducts.length, message: `Imported ${createdProducts.length} new items and updated ${updatedProducts.length} items from invoice` });
         }
-        // --- Manual Flow (Single Product) ---
+        const { baseUnit, purchaseUnit, conversionFactor } = req.body;
         // Validate required fields for manual creation
         if (!name || !price) {
             return res.status(400).json({ error: 'Name and Price are required for manual creation' });
@@ -425,6 +441,11 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 return res.status(400).json({ error: 'A product with this SKU already exists in your inventory.' });
             }
         }
+        const parsedConversionFactor = conversionFactor ? parseFloat(conversionFactor) : null;
+        let finalStock = stock ? parseFloat(stock) : 0;
+        if (parsedConversionFactor && parsedConversionFactor > 0 && purchaseUnit && baseUnit) {
+            finalStock = finalStock * parsedConversionFactor;
+        }
         const product = yield prisma_1.default.product.create({
             data: {
                 name,
@@ -433,9 +454,13 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 category: category || 'General',
                 price: parseFloat(price),
                 costPrice: costPrice ? parseFloat(costPrice) : undefined,
-                stock: stock ? parseInt(stock) : 0,
+                stock: finalStock,
+                baseUnit,
+                purchaseUnit,
+                conversionFactor: parsedConversionFactor,
                 image: imageUrl,
-                retailerId: retailerProfile.id
+                retailerId: retailerProfile.id,
+                barcode: sku // Save sku as barcode for manual entry POS scanning
             }
         });
         res.json({ success: true, product });
@@ -450,7 +475,7 @@ exports.createProduct = createProduct;
 const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const { name, description, category, price, costPrice, stock, image, sku } = req.body;
+        const { name, description, category, price, costPrice, stock, image, sku, baseUnit, purchaseUnit, conversionFactor } = req.body;
         // Validate SKU uniqueness
         if (sku) {
             const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
@@ -478,8 +503,13 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 category,
                 price: price ? parseFloat(price) : undefined,
                 costPrice: costPrice ? parseFloat(costPrice) : undefined,
-                stock: stock !== undefined ? parseInt(stock) : undefined,
-                image: imageUrl
+                stock: stock !== undefined ? parseFloat(stock) : undefined,
+                baseUnit,
+                purchaseUnit,
+                conversionFactor: conversionFactor ? parseFloat(conversionFactor) : null,
+                image: imageUrl,
+                sku: sku !== undefined ? sku : undefined,
+                barcode: sku !== undefined ? sku : undefined // Update barcode with sku
             }
         });
         res.json({ success: true, product });
@@ -782,6 +812,18 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         subtotal, tax_amount, discount, customer_phone, payment_details // { pin, uid } for NFC
          } = req.body;
         const total = (subtotal + tax_amount - (discount || 0));
+        // --- Module 5: The Sales Discount Safeguard System ---
+        if (discount && discount > 0 && subtotal > 0) {
+            const config = yield prisma_1.default.systemConfig.findFirst();
+            const maxDiscountPct = (config === null || config === void 0 ? void 0 : config.maxDiscountPercentage) || 5; // Default safety floor of 5%
+            const requestedDiscountPct = (discount / subtotal) * 100;
+            if (requestedDiscountPct > maxDiscountPct) {
+                return res.status(400).json({
+                    error: `Discount Blocked: The requested discount of ${requestedDiscountPct.toFixed(1)}% exceeds the Admin-approved maximum limit of ${maxDiscountPct}%. Transaction locked.`
+                });
+            }
+        }
+        // --- End Module 5 ---
         // 1. Validate items and stock
         const productIds = items.map((item) => Number(item.product_id));
         const products = yield prisma_1.default.product.findMany({

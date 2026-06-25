@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import prisma from '../utils/prisma';
 import { uploadImage } from '../utils/cloudinary';
 import { emailQueue } from '../queues/email.queue';
+import { calculateWholesalePrice } from '../utils/pricingUtils';
 import { TemplateService } from '../services/template.service';
 
 // Get dashboard stats with comprehensive calculations
@@ -391,16 +392,18 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       low_stock_threshold,
       invoice_number,
       barcode,
-      image             // Base64 string from frontend
+      image,            // Base64 string from frontend
+      taxType,
+      supplierCost
     } = req.body;
 
     // Validate required fields
-    if (!name || !category || !wholesale_price || !barcode) {
+    if (!name || !category || !barcode || !supplierCost) {
       console.error('❌ Missing required fields');
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['name', 'category', 'wholesale_price', 'barcode'],
-        received: { name, category, wholesale_price, barcode }
+        required: ['name', 'category', 'barcode', 'supplierCost'],
+        received: { name, category, barcode, supplierCost }
       });
     }
 
@@ -417,9 +420,9 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Validate wholesale_price is a valid number
-    const parsedPrice = parseFloat(wholesale_price);
-    if (isNaN(parsedPrice) || parsedPrice < 0) {
+    // Validate wholesale_price is a valid number if provided (legacy support)
+    const parsedPrice = wholesale_price ? parseFloat(wholesale_price) : 0;
+    if (wholesale_price && (isNaN(parsedPrice) || parsedPrice < 0)) {
       console.error('❌ Invalid wholesale_price:', wholesale_price);
       return res.status(400).json({
         error: 'Invalid wholesale price',
@@ -427,13 +430,27 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Parse optional cost_price
+    // Parse optional cost_price (kept for legacy support, but supplierCost is primary)
     const parsedCostPrice = cost_price ? parseFloat(cost_price) : undefined;
     if (cost_price && (isNaN(parsedCostPrice!) || parsedCostPrice! < 0)) {
       console.error('❌ Invalid cost_price:', cost_price);
       return res.status(400).json({
         error: 'Invalid cost price',
         details: 'Cost price must be a positive number'
+      });
+    }
+
+    // Validate taxType
+    const validTaxTypes = ['A', 'B', 'C', 'D'];
+    const parsedTaxType = taxType && validTaxTypes.includes(taxType) ? taxType : 'B';
+
+    // Parse supplierCost
+    const parsedSupplierCost = supplierCost ? parseFloat(supplierCost) : undefined;
+    if (supplierCost && (isNaN(parsedSupplierCost!) || parsedSupplierCost! < 0)) {
+      console.error('❌ Invalid supplierCost:', supplierCost);
+      return res.status(400).json({
+        error: 'Invalid supplier cost',
+        details: 'Supplier cost must be a positive number'
       });
     }
 
@@ -457,12 +474,29 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Fetch SystemConfig for pricing pipeline
+    const config = await prisma.systemConfig.findFirst();
+    const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
+    const exciseDutyRatePct = config?.exciseDutyRate || 10;
+
+    // Apply Module 2 Pricing Pipeline if supplierCost is present
+    let finalCalculatedPrice = parsedPrice;
+    if (parsedSupplierCost !== undefined) {
+      const pricingResult = calculateWholesalePrice(
+        parsedSupplierCost,
+        wholesalerMarkupPct,
+        parsedTaxType,
+        exciseDutyRatePct
+      );
+      finalCalculatedPrice = pricingResult.finalInvoicePrice;
+    }
+
     console.log('📦 Creating product with data:', {
       name,
       description,
       sku,
       category,
-      price: parsedPrice,
+      price: finalCalculatedPrice,
       costPrice: parsedCostPrice,
       stock: parsedStock,
       unit,
@@ -487,7 +521,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
         description,
         sku,
         category,
-        price: parsedPrice,           // Store wholesale_price as price
+        price: finalCalculatedPrice,  // Overridden by Module 2 Pricing Pipeline
         costPrice: parsedCostPrice,   // Store cost_price as costPrice
         stock: parsedStock,
         unit,
@@ -495,7 +529,9 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
         invoiceNumber: invoice_number,
         barcode,
         wholesalerId: wholesalerProfile.id,
-        image: imageUrl || null
+        image: imageUrl || null,
+        taxType: parsedTaxType,
+        supplierCost: parsedSupplierCost
       }
     });
 
@@ -878,7 +914,7 @@ export const confirmOrder = async (req: AuthRequest, res: Response) => {
       // 2. Check and decrement stock for each item
       for (const item of orderWithItems.orderItems) {
         if (!item.product) throw new Error(`Product not found for item ${item.productId}`);
-        
+
         if (item.product.stock < item.quantity) {
           throw new Error(`Insufficient stock for product: ${item.product.name}. Available: ${item.product.stock}, Required: ${item.quantity}`);
         }
@@ -992,7 +1028,7 @@ export const rejectOrder = async (req: AuthRequest, res: Response) => {
 
     const updatedOrder = await prisma.order.update({
       where: { id: Number(id) },
-      data: { 
+      data: {
         status: 'rejected',
         rejectionReason: reason || 'N/A'
       } as any,
@@ -1020,9 +1056,9 @@ export const shipOrder = async (req: AuthRequest, res: Response) => {
 
     // MANDATORY FIELD VALIDATION FOR SHIPPING
     if (!shipperName || !shipperPhone || !vehiclePlate) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Mandatory shipping information missing: Shipper Name, Phone, and Vehicle Plate are required.' 
+      return res.status(400).json({
+        success: false,
+        error: 'Mandatory shipping information missing: Shipper Name, Phone, and Vehicle Plate are required.'
       });
     }
 
@@ -1053,7 +1089,7 @@ export const shipOrder = async (req: AuthRequest, res: Response) => {
 
     const updatedOrder = await prisma.order.update({
       where: { id: Number(id) },
-      data: { 
+      data: {
         status: 'shipped',
         shipperName,
         shipperPhone,
@@ -1113,6 +1149,13 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
         }
       });
 
+      // Fetch SystemConfig for Retailer Inheritance Pipeline
+      const config = await prisma.systemConfig.findFirst();
+      const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
+      const retailerMarkupPct = config?.retailerMarkup || 20;
+      const exciseDutyRatePct = config?.exciseDutyRate || 10;
+      const { calculateRetailPrice } = await import('../utils/pricingUtils');
+
       // 2. Update Retailer's Inventory
       for (const item of updatedOrder.orderItems) {
         if (!item.product) continue;
@@ -1120,7 +1163,7 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
         // Search for existing product in retailer's inventory robustly
         // Priority: Barcode > SKU > Name
         let existingProduct = null;
-        
+
         if (item.product.barcode && item.product.barcode.trim() !== '') {
           existingProduct = await tx.product.findFirst({
             where: {
@@ -1130,7 +1173,7 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
             }
           });
         }
-        
+
         if (!existingProduct && item.product.sku && item.product.sku.trim() !== '') {
           existingProduct = await tx.product.findFirst({
             where: {
@@ -1140,7 +1183,7 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
             }
           });
         }
-        
+
         if (!existingProduct) {
           existingProduct = await tx.product.findFirst({
             where: {
@@ -1153,15 +1196,40 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
 
         if (existingProduct) {
           // Update existing stock and ensure it's active
+          const conversionFactor = existingProduct.conversionFactor ? Number(existingProduct.conversionFactor) : null;
+          let addStock = item.quantity;
+          if (conversionFactor && conversionFactor > 0) {
+            addStock = item.quantity * conversionFactor;
+          }
+
           await tx.product.update({
             where: { id: existingProduct.id },
             data: { 
-              stock: { increment: item.quantity },
+              stock: { increment: addStock },
               status: 'active'
             }
           });
         } else {
           // Create new product for retailer based on wholesaler's product
+
+          // Retailer Inheritance Pipeline
+          const supplierCost = item.product.supplierCost || item.product.costPrice || 0;
+          const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
+          const taxType = item.product.taxType || 'B';
+
+          const retailPricing = calculateRetailPrice(
+              cleanBaseCost,
+              retailerMarkupPct,
+              taxType,
+              exciseDutyRatePct
+          );
+
+          const conversionFactor = (item.product as any).conversionFactor ? Number((item.product as any).conversionFactor) : null;
+          let addStock = item.quantity;
+          if (conversionFactor && conversionFactor > 0) {
+            addStock = item.quantity * conversionFactor;
+          }
+
           await tx.product.create({
             data: {
               name: item.product.name,
@@ -1169,14 +1237,19 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
               sku: item.product.sku,
               barcode: item.product.barcode,
               category: item.product.category,
-              price: item.product.retailerPrice || (item.product.price * 1.2), // Use configured retailer price, default to 20% markup if not set
-              costPrice: item.product.price,    // Wholesaler's price is retailer's cost
-              stock: item.quantity,
+              price: retailPricing.finalConsumerShelfPrice, // Module 2 generated Final Consumer Shelf Price
+              costPrice: cleanBaseCost,                     // Retailer's cost basis (Taxes stripped out)
+              stock: addStock,
               retailerId: updatedOrder.retailerId,
               unit: item.product.unit,
+              baseUnit: (item.product as any).baseUnit,
+              purchaseUnit: (item.product as any).purchaseUnit,
+              conversionFactor: (item.product as any).conversionFactor,
               image: item.product.image,
-              status: 'active'
-            }
+              status: 'active',
+              taxType: taxType,
+              supplierCost: item.product.price              // The actual invoice amount they paid for the stock
+            } as any
           });
         }
       }
@@ -1185,7 +1258,7 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
       const { emailQueue } = await import('../queues/email.queue');
       const deliveryDate = updatedOrder.updatedAt.toLocaleDateString();
       const amountStr = updatedOrder.totalAmount.toLocaleString();
-      
+
       await emailQueue.add('order-delivered', {
         to: updatedOrder.retailerProfile.user.email,
         templateType: 'order-delivered', // Mapped to RET-EMAIL-003
@@ -1798,7 +1871,7 @@ export const generateUniqueBarcode = async (req: AuthRequest, res: Response) => 
       // Generate a 12-digit random number (e.g. starting with 990 for custom generated codes)
       const randomPart = Math.floor(100000000 + Math.random() * 900000000).toString();
       barcode = `990${randomPart}`;
-      
+
       const existing = await prisma.product.findFirst({
         where: { barcode }
       });

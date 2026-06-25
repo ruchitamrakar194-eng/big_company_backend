@@ -101,15 +101,22 @@ const initiateGasMeterRecharge = (req, res) => __awaiter(void 0, void 0, void 0,
         const adminMinTopup = (config === null || config === void 0 ? void 0 : config.minGasTopup) || 500;
         const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || Number(process.env.GAS_PRICE_PER_M3) || 1500;
         const parsedAmount = Number(amount || 0);
-        totalMoneyAmount = isVendByUnit ? parsedAmount * gasPrice : parsedAmount;
-        totalVolume = isVendByUnit ? parsedAmount : (parsedAmount / gasPrice);
+        if (!isPushToken && (isNaN(parsedAmount) || parsedAmount <= 0)) {
+            return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
+        }
+        const rawVolume = isVendByUnit ? parsedAmount : (parsedAmount / gasPrice);
+        totalVolume = Math.floor(rawVolume * 10) / 10;
+        totalMoneyAmount = totalVolume * gasPrice;
         // ZERO cost for Token Push Mode
         if (isPushToken) {
             totalMoneyAmount = 0;
             totalVolume = 0;
         }
-        if (!isPushToken && (isNaN(parsedAmount) || parsedAmount <= 0)) {
-            return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
+        if (!isPushToken && totalVolume < 0.1) {
+            return res.status(400).json({
+                success: false,
+                error: 'Minimum volume for recharge is 0.1 m³.',
+            });
         }
         // Only deduct if authenticated and using a payment method
         if (userId && (paymentMethod === 'wallet' || paymentMethod === 'credit_wallet' || paymentMethod === 'gas_rewards' || paymentMethod === 'nfc_card')) {
@@ -120,20 +127,12 @@ const initiateGasMeterRecharge = (req, res) => __awaiter(void 0, void 0, void 0,
                 return res.status(404).json({ success: false, error: 'Consumer profile not found.' });
             }
             consumerProfileId = consumerProfile.id;
-            // Identify if meter is Zamuka (based on provider)
-            const isZamuka = selectedProvider === 'stronpower';
             // Validate Minimum Amount (Requirement 2.3.1)
             if (!isPushToken) {
                 if (paymentMethod !== 'gas_rewards' && totalMoneyAmount < adminMinTopup) {
                     return res.status(400).json({
                         success: false,
                         error: `Minimum rechargeable amount is ${adminMinTopup} RWF.`,
-                    });
-                }
-                if (isZamuka && totalVolume < 0.1) {
-                    return res.status(400).json({
-                        success: false,
-                        error: `Minimum volume for Zamuka meter is 0.1 m³.`,
                     });
                 }
             }
