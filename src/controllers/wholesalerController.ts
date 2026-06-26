@@ -394,16 +394,20 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       barcode,
       image,            // Base64 string from frontend
       taxType,
-      supplierCost
+      supplierCost,
+      baseUnit,
+      purchaseUnit,
+      conversionFactor,
+      costPerPurchaseUnit
     } = req.body;
 
     // Validate required fields
-    if (!name || !category || !barcode || !supplierCost) {
+    if (!name || !category || !barcode || (!supplierCost && !costPerPurchaseUnit)) {
       console.error('❌ Missing required fields');
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['name', 'category', 'barcode', 'supplierCost'],
-        received: { name, category, barcode, supplierCost }
+        required: ['name', 'category', 'barcode', 'supplierCost or costPerPurchaseUnit'],
+        received: { name, category, barcode, supplierCost, costPerPurchaseUnit }
       });
     }
 
@@ -444,18 +448,27 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
     const validTaxTypes = ['A', 'B', 'C', 'D'];
     const parsedTaxType = taxType && validTaxTypes.includes(taxType) ? taxType : 'B';
 
-    // Parse supplierCost
-    const parsedSupplierCost = supplierCost ? parseFloat(supplierCost) : undefined;
-    if (supplierCost && (isNaN(parsedSupplierCost!) || parsedSupplierCost! < 0)) {
-      console.error('❌ Invalid supplierCost:', supplierCost);
+    const parsedConversion = conversionFactor ? parseFloat(conversionFactor) : null;
+    const parsedCostPerPurchaseUnit = costPerPurchaseUnit ? parseFloat(costPerPurchaseUnit) : undefined;
+    
+    let parsedSupplierCost = supplierCost ? parseFloat(supplierCost) : undefined;
+    if (parsedCostPerPurchaseUnit !== undefined && parsedConversion && parsedConversion > 0) {
+      parsedSupplierCost = parsedCostPerPurchaseUnit / parsedConversion;
+    }
+
+    if (parsedSupplierCost !== undefined && (isNaN(parsedSupplierCost) || parsedSupplierCost < 0)) {
+      console.error('❌ Invalid supplierCost / costPerPurchaseUnit:', { supplierCost, costPerPurchaseUnit });
       return res.status(400).json({
-        error: 'Invalid supplier cost',
-        details: 'Supplier cost must be a positive number'
+        error: 'Invalid cost input',
+        details: 'Supplier cost or Cost per Purchase Unit must be a positive number'
       });
     }
 
     // Parse stock
-    const parsedStock = stock ? parseFloat(stock) : 0;
+    let parsedStock = stock ? parseFloat(stock) : 0;
+    if (parsedConversion && parsedConversion > 0 && req.body.stockInPurchaseUnits) {
+      parsedStock = parsedStock * parsedConversion;
+    }
     if (stock && (isNaN(parsedStock) || parsedStock < 0)) {
       console.error('❌ Invalid stock:', stock);
       return res.status(400).json({
@@ -531,8 +544,11 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
         wholesalerId: wholesalerProfile.id,
         image: imageUrl || null,
         taxType: parsedTaxType,
-        supplierCost: parsedSupplierCost
-      }
+        supplierCost: parsedSupplierCost,
+        baseUnit: baseUnit || null,
+        purchaseUnit: purchaseUnit || null,
+        conversionFactor: parsedConversion
+      } as any
     });
 
     console.log('✅ Product created successfully:', product.id);
@@ -550,7 +566,24 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
 export const updateProduct = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, category, sku, unit, low_stock_threshold, invoice_number, barcode, description, image } = req.body;
+    const { 
+      name, 
+      category, 
+      sku, 
+      unit, 
+      low_stock_threshold, 
+      invoice_number, 
+      barcode, 
+      description, 
+      image,
+      baseUnit,
+      purchaseUnit,
+      conversionFactor,
+      costPerPurchaseUnit,
+      supplierCost,
+      taxType,
+      wholesale_price
+    } = req.body;
 
     const wholesalerProfile = await prisma.wholesalerProfile.findUnique({
       where: { userId: req.user?.id }
@@ -558,6 +591,14 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
 
     if (!wholesalerProfile) {
       return res.status(404).json({ error: 'Wholesaler profile not found' });
+    }
+
+    const currentProduct = await prisma.product.findUnique({
+      where: { id: Number(id), wholesalerId: wholesalerProfile.id }
+    });
+
+    if (!currentProduct) {
+      return res.status(404).json({ error: 'Product not found or not owned by wholesaler' });
     }
 
     // Upload to Cloudinary if new image is provided
@@ -583,6 +624,30 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const parsedConversion = conversionFactor !== undefined ? (conversionFactor ? parseFloat(conversionFactor) : null) : (currentProduct as any).conversionFactor;
+    const parsedCostPerPurchaseUnit = costPerPurchaseUnit !== undefined ? parseFloat(costPerPurchaseUnit) : undefined;
+    
+    let parsedSupplierCost = supplierCost !== undefined ? parseFloat(supplierCost) : undefined;
+    if (parsedCostPerPurchaseUnit !== undefined && parsedConversion && parsedConversion > 0) {
+      parsedSupplierCost = parsedCostPerPurchaseUnit / parsedConversion;
+    }
+
+    let finalCalculatedPrice = wholesale_price ? parseFloat(wholesale_price) : undefined;
+    if (parsedSupplierCost !== undefined) {
+      const resolvedTaxType = taxType || currentProduct.taxType || 'B';
+      const config = await prisma.systemConfig.findFirst();
+      const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
+      const exciseDutyRatePct = config?.exciseDutyRate || 10;
+
+      const pricingResult = calculateWholesalePrice(
+        parsedSupplierCost,
+        wholesalerMarkupPct,
+        resolvedTaxType,
+        exciseDutyRatePct
+      );
+      finalCalculatedPrice = pricingResult.finalInvoicePrice;
+    }
+
     const product = await prisma.product.update({
       where: {
         id: Number(id),
@@ -597,8 +662,13 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
         invoiceNumber: invoice_number,
         barcode,
         description,
-        image: imageUrl
-      }
+        image: imageUrl,
+        price: finalCalculatedPrice,
+        supplierCost: parsedSupplierCost,
+        baseUnit: baseUnit !== undefined ? (baseUnit || null) : undefined,
+        purchaseUnit: purchaseUnit !== undefined ? (purchaseUnit || null) : undefined,
+        conversionFactor: parsedConversion
+      } as any
     });
 
     res.json({ success: true, product });

@@ -3582,6 +3582,17 @@ export const saveEmailTemplate = async (req: AuthRequest, res: Response) => {
       create: { name, subject, content, description, isActive, portal, triggerName, channel }
     });
 
+    // Auto-map event slug if triggerName is provided to ensure delivery/trigger
+    if (triggerName) {
+      const eventSlug = triggerName.trim();
+      // @ts-ignore
+      await prisma.emailEvent.upsert({
+        where: { eventSlug },
+        update: { templateName: name, description: `Auto-mapped event for template ${name}` },
+        create: { eventSlug, templateName: name, description: `Auto-mapped event for template ${name}` }
+      });
+    }
+
     res.json({ success: true, template, message: 'Template saved successfully' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -3766,6 +3777,44 @@ export const acknowledgeAlert = async (req: AuthRequest, res: Response) => {
       }
     });
     res.json({ success: true, alert, message: 'Alert acknowledged successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const updateCustomerCreditLimit = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params; // ConsumerProfile ID
+    const { creditLimit } = req.body;
+
+    if (creditLimit === undefined || isNaN(parseFloat(creditLimit)) || parseFloat(creditLimit) < 0) {
+      return res.status(400).json({ success: false, error: 'Invalid credit limit amount' });
+    }
+
+    const profile = await prisma.consumerProfile.update({
+      where: { id: Number(id) },
+      data: { creditLimit: parseFloat(creditLimit) } as any
+    });
+
+    res.json({ success: true, profile, message: 'Customer credit limit updated successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const getCustomerCreditLimit = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params; // ConsumerProfile ID
+    const profile = await prisma.consumerProfile.findUnique({
+      where: { id: Number(id) },
+      include: { user: { select: { name: true, email: true, phone: true } } }
+    });
+
+    if (!profile) {
+      return res.status(404).json({ success: false, error: 'Customer profile not found' });
+    }
+
+    res.json({ success: true, creditLimit: (profile as any).creditLimit || 50000, profile });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

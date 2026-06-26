@@ -1141,9 +1141,10 @@ export const applyForLoan = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'You have a pending or active outstanding loan. Please pay it off in full first.' });
     }
 
-    // Customer credit limit check (e.g. 50,000 RWF or custom if we have it)
-    if (amount > 50000) {
-      return res.status(400).json({ error: 'Amount exceeds maximum limit' });
+    // Customer credit limit check (using database configured limit, defaulting to 50,000 RWF)
+    const limit = (consumerProfile as any).creditLimit !== undefined ? (consumerProfile as any).creditLimit : 50000;
+    if (amount > limit) {
+      return res.status(400).json({ error: `Amount exceeds maximum credit limit of ${limit.toLocaleString()} RWF` });
     }
 
     const result = await prisma.$transaction(async (prisma) => {

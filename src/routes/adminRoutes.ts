@@ -6,6 +6,8 @@ import {
   createCustomer,
   updateCustomer,
   deleteCustomer,
+  updateCustomerCreditLimit,
+  getCustomerCreditLimit,
   getRetailers,
   createRetailer,
   updateRetailer,
@@ -93,6 +95,8 @@ router.post('/customers', createCustomer);
 router.put('/customers/:id', updateCustomer);
 router.delete('/customers/:id', deleteCustomer);
 router.put('/customers/:id/status', updateCustomerStatus);
+router.get('/customers/:id/credit-limit', getCustomerCreditLimit);
+router.put('/customers/:id/credit-limit', updateCustomerCreditLimit);
 
 // Retailer Routes
 router.get('/retailers', getRetailers);
