@@ -343,7 +343,87 @@ export const sendToMeter = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ success: false, error: 'Minimum transfer amount is 0.1 m³.' });
         }
 
-        // 1. Resolve Meter (Flexible search for with/without MTR- prefix)
+        // 1. Resolve Meter or User
+        // First check if meterId matches a Reward ID (User)
+        const receiverUser = await prisma.user.findFirst({
+            where: {
+                OR: [
+                    { phone: meterId },
+                    { email: meterId },
+                    { id: isNaN(parseInt(meterId)) ? -1 : parseInt(meterId) }
+                ]
+            }
+        });
+
+        if (receiverUser) {
+            // This is a Reward Share to another user
+            const senderId = req.user!.id;
+            
+            if (receiverUser.id === senderId) {
+                return res.status(400).json({ success: false, error: 'You cannot send rewards to yourself.' });
+            }
+
+            if (!receiverUser.isActive) {
+                return res.status(400).json({ success: false, error: 'Recipient account is not active.' });
+            }
+
+            const receiverProfile = await prisma.consumerProfile.findUnique({
+                where: { userId: receiverUser.id }
+            });
+
+            if (!receiverProfile) {
+                return res.status(404).json({ success: false, error: 'Recipient is not registered as a consumer.' });
+            }
+
+            const senderProfile = await prisma.consumerProfile.findUnique({
+                where: { userId: senderId },
+                include: { user: true }
+            });
+
+            if (!senderProfile) {
+                return res.status(404).json({ success: false, error: 'Your consumer profile was not found.' });
+            }
+
+            const senderRewards = await prisma.gasReward.findMany({
+                where: { consumerId: senderProfile.id }
+            });
+            const totalSenderBalance = senderRewards.reduce((sum, r) => sum + r.units, 0);
+
+            if (totalSenderBalance < roundedAmount) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: `Insufficient gas rewards balance. Available: ${totalSenderBalance.toFixed(2)} m³.` 
+                });
+            }
+
+            const senderIdentifier = senderProfile.user.phone || senderProfile.user.email || senderProfile.user.id.toString();
+
+            await prisma.$transaction([
+                prisma.gasReward.create({
+                    data: {
+                        consumerId: senderProfile.id,
+                        units: -roundedAmount,
+                        source: 'sent',
+                        reference: `Shared to ${meterId}`
+                    }
+                }),
+                prisma.gasReward.create({
+                    data: {
+                        consumerId: receiverProfile.id,
+                        units: roundedAmount,
+                        source: 'received',
+                        reference: `Received from ${senderIdentifier}`
+                    }
+                })
+            ]);
+
+            return res.json({
+                success: true,
+                message: `Successfully transferred ${roundedAmount} m³ to ${receiverUser.name || meterId}.`
+            });
+        }
+
+        // If not a user, process as Meter Recharge
         const meter = await prisma.gasMeter.findFirst({
             where: {
                 OR: [
@@ -374,7 +454,9 @@ export const sendToMeter = async (req: AuthRequest, res: Response) => {
         return initiateGasMeterRecharge(rechargeReq, res);
 
     } catch (error: any) {
-        console.error('Error sending rewards to meter:', error);
+        console.error('Error sending rewards:', error);
         return res.status(500).json({ success: false, error: 'Failed to send rewards. Please try again.' });
     }
 };
+
+
