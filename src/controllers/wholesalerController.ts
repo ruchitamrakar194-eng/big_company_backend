@@ -411,6 +411,25 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Validate or auto-generate SKU
+    let finalSku = sku;
+    if (!finalSku || finalSku.trim() === '') {
+      finalSku = `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    } else {
+      finalSku = finalSku.trim();
+    }
+
+    // Validate SKU uniqueness globally
+    const duplicateSku = await prisma.product.findFirst({
+      where: { sku: finalSku }
+    });
+    if (duplicateSku) {
+      console.error('❌ Duplicate SKU:', finalSku);
+      return res.status(400).json({
+        error: 'A product with this SKU already exists. SKU must be unique globally.'
+      });
+    }
+
     // Validate barcode uniqueness
     if (barcode) {
       const duplicateBarcode = await prisma.product.findFirst({
@@ -507,7 +526,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
     console.log('📦 Creating product with data:', {
       name,
       description,
-      sku,
+      sku: finalSku,
       category,
       price: finalCalculatedPrice,
       costPrice: parsedCostPrice,
@@ -532,7 +551,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
       data: {
         name,
         description,
-        sku,
+        sku: finalSku,
         category,
         price: finalCalculatedPrice,  // Overridden by Module 2 Pricing Pipeline
         costPrice: parsedCostPrice,   // Store cost_price as costPrice
