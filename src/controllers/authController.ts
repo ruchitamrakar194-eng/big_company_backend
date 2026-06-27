@@ -134,7 +134,7 @@ export const register = async (req: Request, res: Response) => {
       });
     }
 
-    const token = generateToken({ id: user.id, role: user.role });
+    const token = generateToken({ id: user.id, role: user.role, require_password_reset: false });
 
     // Trigger Customer Signup SMS (CUS-SMS-001)
     if (targetuser_role === 'consumer' && user.phone) {
@@ -272,7 +272,7 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = generateToken({ id: user.id, role: user.role });
+    const token = generateToken({ id: user.id, role: user.role, require_password_reset: user.isFirstLogin });
 
     // Notify Retailer of Suspicious Activity (RET-EMAIL-015)
     if (user.role === 'retailer' && user.email) {

@@ -19,6 +19,10 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
     const token = authHeader.substring(7);
     const decoded = verifyToken(token) as any;
     
+    if (decoded.require_password_reset && !req.originalUrl.includes('/update-password') && !req.originalUrl.includes('/update-pin')) {
+      return res.status(403).json({ error: 'Password reset required', require_password_reset: true });
+    }
+    
     req.user = {
       id: Number(decoded.id),
       role: decoded.role
@@ -51,6 +55,10 @@ export const optionalAuthenticate = (req: AuthRequest, res: Response, next: Next
 
     const token = authHeader.substring(7);
     const decoded = verifyToken(token) as any;
+
+    if (decoded.require_password_reset && !req.originalUrl.includes('/update-password') && !req.originalUrl.includes('/update-pin')) {
+      return next(); // Don't populate user if reset is required, acts as no token
+    }
 
     req.user = {
       id: Number(decoded.id),
