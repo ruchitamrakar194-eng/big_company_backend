@@ -1371,8 +1371,20 @@ export const getActiveLoanLedger = async (req: AuthRequest, res: Response) => {
     });
 
     const paidAmount = repayments.reduce((sum, t) => sum + t.amount, 0);
-    const totalAmount = loan.amount; // Assuming 0 interest for now based on schema
-    const interestRate = 0; // Fixed for now
+    let rates: any = {};
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const p = path.join(process.cwd(), 'data', 'system_rates.json');
+      if (fs.existsSync(p)) {
+        rates = JSON.parse(fs.readFileSync(p, 'utf8'));
+      }
+    } catch (e) { }
+
+    const interestRate = Number(rates.customerInterestRate) || 10;
+    const interestAmount = Math.round(loan.amount * (interestRate / 100));
+
+    const totalAmount = loan.amount + interestAmount;
     const outstandingBalance = Math.max(0, totalAmount - paidAmount);
 
     // Generate Schedule (Synthetic 4 weeks)
@@ -1418,6 +1430,7 @@ export const getActiveLoanLedger = async (req: AuthRequest, res: Response) => {
       id: loan.id,
       loan_number: `LOAN-${loan.createdAt.getFullYear()}-${loan.id.toString().padStart(4, '0')}`,
       amount: loan.amount,
+      interest_amount: interestAmount,
       disbursed_date: loan.createdAt.toISOString(),
       repayment_frequency: 'weekly',
       interest_rate: interestRate,
