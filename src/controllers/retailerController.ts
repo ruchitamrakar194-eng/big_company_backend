@@ -409,7 +409,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
               description: sourceProduct.description,
               sku: sourceProduct.sku,
               category: sourceProduct.category,
-              price: sourceProduct.retailerPrice || (sourceProduct.price * 1.2), // Default markup 20% if no retailerPrice set
+              price: sourceProduct.retailerPrice || (cleanCost * 1.2), // Default markup 20% on true acquisition cost
               costPrice: cleanCost, // Cost is what they paid in the order, reversed pre-tax
               stock: addStock,
               unit: sourceProduct.unit,
@@ -3659,8 +3659,8 @@ export const confirmPurchaseOrderDelivery = async (req: AuthRequest, res: Respon
               sku: item.product.sku,
               barcode: item.product.barcode,
               category: item.product.category,
-              price: item.product.price * 1.2, // Default 20% markup for retailer if new
-              costPrice: item.product.price,    // Wholesaler's price is retailer's cost
+              price: item.price * 1.2, // Default 20% markup based on true acquisition cost
+              costPrice: item.price,    // True acquisition cost from the order
               stock: item.quantity,
               retailerId: retailerProfile.id,
               unit: item.product.unit,
