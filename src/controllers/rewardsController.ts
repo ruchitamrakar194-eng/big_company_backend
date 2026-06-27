@@ -335,13 +335,16 @@ export const sendToMeter = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
         }
 
-        // Apply strict round-down rule to 1 decimal place
-        const roundedAmount = Math.floor(parsedAmount * 10) / 10;
-
-        // Apply minimum transfer limit check of 0.1 m³
-        if (roundedAmount < 0.1) {
+        if (parsedAmount < 0.1) {
             return res.status(400).json({ success: false, error: 'Minimum transfer amount is 0.1 m³.' });
         }
+
+        const decimals = parsedAmount.toString().split('.')[1];
+        if (decimals && decimals.length > 1) {
+            return res.status(400).json({ success: false, error: `Only one decimal precision allowed. Value ${parsedAmount} is invalid.` });
+        }
+
+        const roundedAmount = parsedAmount;
 
         // 1. Resolve Meter or User
         // First check if meterId matches a Reward ID (User)
