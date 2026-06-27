@@ -531,7 +531,9 @@ export const updatePassword = async (req: any, res: Response) => {
       });
     }
 
-    res.json({ success: true, message: 'Password updated successfully' });
+    const newToken = generateToken({ id: user.id, role: user.role, require_password_reset: false });
+
+    res.json({ success: true, message: 'Password updated successfully', access_token: newToken });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -601,7 +603,9 @@ export const updatePin = async (req: any, res: Response) => {
       });
     }
 
-    res.json({ success: true, message: 'PIN updated successfully' });
+    const newToken = generateToken({ id: user.id, role: user.role, require_password_reset: false });
+
+    res.json({ success: true, message: 'PIN updated successfully', access_token: newToken });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
