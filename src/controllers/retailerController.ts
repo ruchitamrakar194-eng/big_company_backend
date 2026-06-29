@@ -407,7 +407,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
           const invoiceTaxType = (sourceProduct as any).taxType || 'B';
           const invoiceMarkupPrice = cleanCost * 1.2;
           const invoiceVatMultiplier = invoiceTaxType === 'B' ? 1.18 : 1;
-          const invoiceFinalPrice = sourceProduct.retailerPrice || Math.round(invoiceMarkupPrice * invoiceVatMultiplier);
+          const invoiceFinalPrice = sourceProduct.retailerPrice || Math.ceil(invoiceMarkupPrice * invoiceVatMultiplier);
 
           const newProduct = await prisma.product.create({
             data: {
@@ -3662,7 +3662,7 @@ export const confirmPurchaseOrderDelivery = async (req: AuthRequest, res: Respon
           const orderTaxType = (item.product as any).taxType || 'B';
           const orderMarkupPrice = item.price * 1.2;
           const orderVatMultiplier = orderTaxType === 'B' ? 1.18 : 1;
-          const orderFinalPrice = Math.round(orderMarkupPrice * orderVatMultiplier);
+          const orderFinalPrice = Math.ceil(orderMarkupPrice * orderVatMultiplier);
 
           await tx.product.create({
             data: {
