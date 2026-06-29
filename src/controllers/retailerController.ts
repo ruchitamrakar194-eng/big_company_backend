@@ -404,8 +404,10 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
           }
 
           // Calculate final retail price: (cost + markup) + 18% VAT for Type B products
+          const config = await prisma.systemConfig.findFirst();
+          const retailerMarkup = (config as any)?.retailerMarkup || 20;
           const invoiceTaxType = (sourceProduct as any).taxType || 'B';
-          const invoiceMarkupPrice = cleanCost * 1.2;
+          const invoiceMarkupPrice = cleanCost * (1 + retailerMarkup / 100);
           const invoiceVatMultiplier = invoiceTaxType === 'B' ? 1.18 : 1;
           const invoiceFinalPrice = sourceProduct.retailerPrice || Math.ceil(invoiceMarkupPrice * invoiceVatMultiplier);
 
@@ -3658,9 +3660,11 @@ export const confirmPurchaseOrderDelivery = async (req: AuthRequest, res: Respon
           });
         } else {
           // Create new product for retailer based on wholesaler's product
-          // Calculate final retail price: (cost + 20% markup) + 18% VAT for Type B products
+          // Calculate final retail price: (cost + markup) + 18% VAT for Type B products
+          const config = await tx.systemConfig.findFirst();
+          const retailerMarkup = (config as any)?.retailerMarkup || 20;
           const orderTaxType = (item.product as any).taxType || 'B';
-          const orderMarkupPrice = item.price * 1.2;
+          const orderMarkupPrice = item.price * (1 + retailerMarkup / 100);
           const orderVatMultiplier = orderTaxType === 'B' ? 1.18 : 1;
           const orderFinalPrice = Math.ceil(orderMarkupPrice * orderVatMultiplier);
 
