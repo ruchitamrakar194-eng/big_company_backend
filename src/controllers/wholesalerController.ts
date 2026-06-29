@@ -508,8 +508,8 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
 
     // Fetch SystemConfig for pricing pipeline
     const config = await prisma.systemConfig.findFirst();
-    const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
-    const exciseDutyRatePct = config?.exciseDutyRate || 10;
+    const wholesalerMarkupPct = (config as any)?.wholesalerMarkup || 20;
+    const exciseDutyRatePct = (config as any)?.exciseDutyRate || 10;
 
     // Apply Module 2 Pricing Pipeline if supplierCost is present
     let finalCalculatedPrice = parsedPrice;
@@ -653,10 +653,10 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
 
     let finalCalculatedPrice = wholesale_price ? parseFloat(wholesale_price) : undefined;
     if (parsedSupplierCost !== undefined) {
-      const resolvedTaxType = taxType || currentProduct.taxType || 'B';
+      const resolvedTaxType = taxType || (currentProduct as any).taxType || 'B';
       const config = await prisma.systemConfig.findFirst();
-      const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
-      const exciseDutyRatePct = config?.exciseDutyRate || 10;
+      const wholesalerMarkupPct = (config as any)?.wholesalerMarkup || 20;
+      const exciseDutyRatePct = (config as any)?.exciseDutyRate || 10;
 
       const pricingResult = calculateWholesalePrice(
         parsedSupplierCost,
@@ -1240,9 +1240,9 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
 
       // Fetch SystemConfig for Retailer Inheritance Pipeline
       const config = await prisma.systemConfig.findFirst();
-      const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
-      const retailerMarkupPct = config?.retailerMarkup || 20;
-      const exciseDutyRatePct = config?.exciseDutyRate || 10;
+      const wholesalerMarkupPct = (config as any)?.wholesalerMarkup || 20;
+      const retailerMarkupPct = (config as any)?.retailerMarkup || 20;
+      const exciseDutyRatePct = (config as any)?.exciseDutyRate || 10;
       const { calculateRetailPrice } = await import('../utils/pricingUtils');
 
       // 2. Update Retailer's Inventory
@@ -1302,9 +1302,9 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
           // Create new product for retailer based on wholesaler's product
 
           // Retailer Inheritance Pipeline
-          const supplierCost = item.product.supplierCost || item.product.costPrice || 0;
+          const supplierCost = (item.product as any).supplierCost || item.product.costPrice || 0;
           const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
-          const taxType = item.product.taxType || 'B';
+          const taxType = (item.product as any).taxType || 'B';
 
           const retailPricing = calculateRetailPrice(
               cleanBaseCost,
