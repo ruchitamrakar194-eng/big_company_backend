@@ -370,7 +370,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
         });
 
         const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
-        const taxType = sourceProduct.taxType || 'B';
+        const taxType = (sourceProduct as any).taxType || 'B';
         const reversedCost = reverseVATCalculation(item.price, taxType);
         const cleanCost = reversedCost.cleanBaseCost;
 
@@ -403,13 +403,19 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
             addStock = item.quantity * conversionFactor;
           }
 
+          // Calculate final retail price: (cost + markup) + 18% VAT for Type B products
+          const invoiceTaxType = (sourceProduct as any).taxType || 'B';
+          const invoiceMarkupPrice = cleanCost * 1.2;
+          const invoiceVatMultiplier = invoiceTaxType === 'B' ? 1.18 : 1;
+          const invoiceFinalPrice = sourceProduct.retailerPrice || Math.round(invoiceMarkupPrice * invoiceVatMultiplier);
+
           const newProduct = await prisma.product.create({
             data: {
               name: sourceProduct.name,
               description: sourceProduct.description,
               sku: sourceProduct.sku,
               category: sourceProduct.category,
-              price: sourceProduct.retailerPrice || (cleanCost * 1.2), // Default markup 20% on true acquisition cost
+              price: invoiceFinalPrice,
               costPrice: cleanCost, // Cost is what they paid in the order, reversed pre-tax
               stock: addStock,
               unit: sourceProduct.unit,
@@ -521,7 +527,7 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
     let cleanCostPrice = costPrice !== undefined ? parseFloat(costPrice) : undefined;
     if (cleanCostPrice !== undefined && cleanCostPrice !== null) {
       const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
-      const resolvedTaxType = taxType || currentProduct?.taxType || 'B';
+      const resolvedTaxType = taxType || (currentProduct as any)?.taxType || 'B';
       const reversed = reverseVATCalculation(cleanCostPrice, resolvedTaxType);
       cleanCostPrice = reversed.cleanBaseCost;
     }
@@ -892,7 +898,7 @@ export const createSale = async (req: AuthRequest, res: Response) => {
     // --- Module 5: The Sales Discount Safeguard System ---
     if (discount && discount > 0 && subtotal > 0) {
       const config = await prisma.systemConfig.findFirst();
-      const maxDiscountPct = config?.maxDiscountPercentage || 5; // Default safety floor of 5%
+      const maxDiscountPct = (config as any)?.maxDiscountPercentage || 5; // Default safety floor of 5%
 
       const requestedDiscountPct = (discount / subtotal) * 100;
 
@@ -3652,6 +3658,12 @@ export const confirmPurchaseOrderDelivery = async (req: AuthRequest, res: Respon
           });
         } else {
           // Create new product for retailer based on wholesaler's product
+          // Calculate final retail price: (cost + 20% markup) + 18% VAT for Type B products
+          const orderTaxType = (item.product as any).taxType || 'B';
+          const orderMarkupPrice = item.price * 1.2;
+          const orderVatMultiplier = orderTaxType === 'B' ? 1.18 : 1;
+          const orderFinalPrice = Math.round(orderMarkupPrice * orderVatMultiplier);
+
           await tx.product.create({
             data: {
               name: item.product.name,
@@ -3659,8 +3671,8 @@ export const confirmPurchaseOrderDelivery = async (req: AuthRequest, res: Respon
               sku: item.product.sku,
               barcode: item.product.barcode,
               category: item.product.category,
-              price: item.price * 1.2, // Default 20% markup based on true acquisition cost
-              costPrice: item.price,    // True acquisition cost from the order
+              price: orderFinalPrice, // (Cost + 20% markup) + 18% VAT
+              costPrice: item.price,  // True acquisition cost from the order
               stock: item.quantity,
               retailerId: retailerProfile.id,
               unit: item.product.unit,
