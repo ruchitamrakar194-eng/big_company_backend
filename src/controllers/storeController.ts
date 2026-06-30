@@ -127,8 +127,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         rewardConsumerId = rewardConsumer.id;
         log(`Reward will be credited to consumer ID: ${rewardConsumerId}`);
       } else {
-        log(`Gas Reward Wallet ID ${gasRewardWalletId} is invalid, defaulting to shopper's own account: ${rewardConsumerId}`);
-        targetRewardId = consumerProfile.gasRewardWalletId || meterId;
+        log(`Gas Reward Wallet ID ${gasRewardWalletId} is invalid`);
+        return res.status(400).json({ error: `Invalid Gas Reward Wallet ID: ${gasRewardWalletId}` });
       }
     }
 

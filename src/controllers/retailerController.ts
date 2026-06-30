@@ -912,6 +912,17 @@ export const createSale = async (req: AuthRequest, res: Response) => {
     }
     // --- End Module 5 ---
 
+    // Validate Gas Reward Wallet ID if provided
+    const { gasRewardWalletId } = req.body;
+    if (gasRewardWalletId) {
+      const rewardConsumer = await prisma.consumerProfile.findFirst({
+        where: { gasRewardWalletId: gasRewardWalletId }
+      });
+      if (!rewardConsumer) {
+        return res.status(400).json({ error: `Invalid Gas Reward Wallet ID: ${gasRewardWalletId}` });
+      }
+    }
+
     // 1. Validate items and stock
     const productIds = items.map((item: any) => Number(item.product_id));
     const products = await prisma.product.findMany({
