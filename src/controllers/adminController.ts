@@ -9,7 +9,7 @@ import path from 'path';
 import { emailQueue } from '../queues/email.queue';
 import { TemplateService } from '../services/template.service';
 import { validateBusinessEmailFormat } from '../utils/email-validator';
-
+import { calculateWholesalePrice, calculateRetailPrice } from '../utils/pricingUtils';
 
 // Get detailed dashboard stats.
 export const getDashboard = async (req: AuthRequest, res: Response) => {
@@ -2525,6 +2525,62 @@ export const getSystemConfig = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const recalculateAllProductsBackground = async (config: any) => {
+  try {
+    console.log('🔄 Starting background recalculation of all product prices...');
+    
+    // Fetch all products that have a supplierCost set (to avoid messing up legacy products without costs)
+    const products = await prisma.product.findMany({
+      where: {
+        supplierCost: { not: null }
+      }
+    });
+
+    const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
+    const retailerMarkupPct = config?.retailerMarkup || 25;
+    const exciseDutyRatePct = config?.exciseDutyRate || 10;
+
+    console.log(`📦 Found ${products.length} products to recalculate. Using Markups: W=${wholesalerMarkupPct}%, R=${retailerMarkupPct}%`);
+
+    let updatedCount = 0;
+    for (const product of products) {
+      if (product.supplierCost === null || product.supplierCost === undefined) continue;
+
+      const taxType = product.taxType || 'B';
+
+      // 1. Calculate Wholesaler Price
+      const wholesalePricing = calculateWholesalePrice(
+        product.supplierCost,
+        wholesalerMarkupPct,
+        taxType,
+        exciseDutyRatePct
+      );
+
+      // 2. Calculate Retailer Price (using the wholesaler's pre-tax price as the retailer's clean base cost)
+      const retailPricing = calculateRetailPrice(
+        wholesalePricing.preTaxPrice,
+        retailerMarkupPct,
+        taxType,
+        exciseDutyRatePct
+      );
+
+      // 3. Update Product
+      await prisma.product.update({
+        where: { id: product.id },
+        data: {
+          price: wholesalePricing.finalInvoicePrice,
+          retailerPrice: retailPricing.finalConsumerShelfPrice
+        }
+      });
+      updatedCount++;
+    }
+
+    console.log(`✅ Background recalculation complete. Updated ${updatedCount} products.`);
+  } catch (error) {
+    console.error('❌ Error during background product recalculation:', error);
+  }
+};
+
 export const updateSystemConfig = async (req: AuthRequest, res: Response) => {
   try {
     const data = { ...req.body };
@@ -2544,6 +2600,11 @@ export const updateSystemConfig = async (req: AuthRequest, res: Response) => {
         data
       });
     }
+
+    // Fire and forget background recalculation
+    recalculateAllProductsBackground(config).catch(err => {
+      console.error('❌ Error triggering recalculation:', err);
+    });
 
     const rates = getCustomRates();
     res.json({ success: true, config: { ...config, ...rates } });
