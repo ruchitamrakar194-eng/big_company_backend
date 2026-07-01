@@ -88,7 +88,7 @@ export const getCustomerProfile = async (req: AuthRequest, res: Response) => {
         const primaryRetailer = lastRetailer || (linkedRetailers.length > 0 ? linkedRetailers[0] : null);
 
         // Check and generate Gas Reward Wallet ID if missing (Requirement: Use Phone Number)
-        if (!consumerProfile.gasRewardWalletId || consumerProfile.gasRewardWalletId.startsWith('GRW-')) {
+        if (!consumerProfile.gasRewardWalletId || consumerProfile.gasRewardWalletId.startsWith('GRW-') || consumerProfile.gasRewardWalletId !== consumerProfile.user.phone) {
             const phoneId = consumerProfile.user.phone;
             if (phoneId) {
                 try {
