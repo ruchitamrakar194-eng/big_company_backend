@@ -2641,10 +2641,12 @@ export const updateSystemConfig = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Fire and forget background recalculation
-    recalculateAllProductsBackground(config).catch(err => {
+    // Await background recalculation so that subsequent navigation shows updated prices immediately
+    try {
+      await recalculateAllProductsBackground(config);
+    } catch (err) {
       console.error('❌ Error triggering recalculation:', err);
-    });
+    }
 
     const rates = getCustomRates();
     res.json({ success: true, config: { ...config, ...rates } });
