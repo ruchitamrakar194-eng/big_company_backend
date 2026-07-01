@@ -55,6 +55,7 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const email_queue_1 = require("../queues/email.queue");
 const email_validator_1 = require("../utils/email-validator");
+const pricingUtils_1 = require("../utils/pricingUtils");
 // Get detailed dashboard stats.
 const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -2305,6 +2306,69 @@ const getSystemConfig = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.getSystemConfig = getSystemConfig;
+const recalculateAllProductsBackground = (config) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        console.log('🔄 Starting background recalculation of all product prices...');
+        // Fetch all products that have a supplierCost set (to avoid messing up legacy products without costs)
+        const products = yield prisma_1.default.product.findMany({
+            where: {
+                wholesalerId: { not: null },
+                supplierCost: { not: null }
+            }
+        });
+        const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
+        const retailerMarkupPct = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 25;
+        const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
+        console.log(`📦 Found ${products.length} products to recalculate. Using Markups: W=${wholesalerMarkupPct}%, R=${retailerMarkupPct}%`);
+        let updatedCount = 0;
+        for (const product of products) {
+            if (product.supplierCost === null || product.supplierCost === undefined)
+                continue;
+            const taxType = product.taxType || 'B';
+            // 1. Calculate Wholesaler Price
+            const wholesalePricing = (0, pricingUtils_1.calculateWholesalePrice)(product.supplierCost, wholesalerMarkupPct, taxType, exciseDutyRatePct);
+            // 2. Calculate Retailer Price (using the wholesaler's pre-tax price as the retailer's clean base cost)
+            const retailPricing = (0, pricingUtils_1.calculateRetailPrice)(wholesalePricing.preTaxPrice, retailerMarkupPct, taxType, exciseDutyRatePct);
+            // 3. Update Product
+            yield prisma_1.default.product.update({
+                where: { id: product.id },
+                data: {
+                    price: wholesalePricing.finalInvoicePrice,
+                    retailerPrice: retailPricing.finalConsumerShelfPrice
+                }
+            });
+            updatedCount++;
+        }
+        console.log(`✅ Background recalculation complete for wholesaler products. Updated ${updatedCount} products.`);
+        // --- RETAILER PRODUCTS ---
+        console.log(`🔄 Starting background recalculation of retailer product prices...`);
+        const retailerProducts = yield prisma_1.default.product.findMany({
+            where: {
+                retailerId: { not: null },
+                costPrice: { not: null }
+            }
+        });
+        console.log(`📦 Found ${retailerProducts.length} retailer products to recalculate. Using Markup: R=${retailerMarkupPct}%`);
+        let retailUpdatedCount = 0;
+        for (const rProduct of retailerProducts) {
+            if (rProduct.costPrice === null || rProduct.costPrice === undefined)
+                continue;
+            const taxType = rProduct.taxType || 'B';
+            const retailPricing = (0, pricingUtils_1.calculateRetailPrice)(rProduct.costPrice, retailerMarkupPct, taxType, exciseDutyRatePct);
+            yield prisma_1.default.product.update({
+                where: { id: rProduct.id },
+                data: {
+                    price: retailPricing.finalConsumerShelfPrice
+                }
+            });
+            retailUpdatedCount++;
+        }
+        console.log(`✅ Background recalculation complete for retailer products. Updated ${retailUpdatedCount} products.`);
+    }
+    catch (error) {
+        console.error('❌ Error during background product recalculation:', error);
+    }
+});
 const updateSystemConfig = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const data = Object.assign({}, req.body);
@@ -2322,6 +2386,10 @@ const updateSystemConfig = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 data
             });
         }
+        // Fire and forget background recalculation
+        recalculateAllProductsBackground(config).catch(err => {
+            console.error('❌ Error triggering recalculation:', err);
+        });
         const rates = getCustomRates();
         res.json({ success: true, config: Object.assign(Object.assign({}, config), rates) });
     }

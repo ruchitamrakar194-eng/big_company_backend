@@ -2498,23 +2498,24 @@ export const getSystemConfig = async (req: AuthRequest, res: Response) => {
 
     // Create default config if it doesn't exist
     if (!config) {
+      const defaultData: any = {
+        retailerShare: 60,
+        companyShare: 28,
+        gasRewardShare: 12,
+        gasPricePerM3: 850,
+        minGasTopup: 500,
+        maxGasTopup: 100000,
+        minWalletTopup: 500,
+        maxWalletTopup: 500000,
+        maxDailyTransaction: 1000000,
+        maxCreditLimit: 500000,
+        wholesalerMarkup: 20,
+        retailerMarkup: 20,
+        maxDiscountPercentage: 5,
+        exciseDutyRate: 10
+      };
       config = await prisma.systemConfig.create({
-        data: {
-          retailerShare: 60,
-          companyShare: 28,
-          gasRewardShare: 12,
-          gasPricePerM3: 850,
-          minGasTopup: 500,
-          maxGasTopup: 100000,
-          minWalletTopup: 500,
-          maxWalletTopup: 500000,
-          maxDailyTransaction: 1000000,
-          maxCreditLimit: 500000,
-          wholesalerMarkup: 20,
-          retailerMarkup: 20,
-          maxDiscountPercentage: 5,
-          exciseDutyRate: 10
-        }
+        data: defaultData
       });
     }
 
@@ -2528,13 +2529,15 @@ export const getSystemConfig = async (req: AuthRequest, res: Response) => {
 const recalculateAllProductsBackground = async (config: any) => {
   try {
     console.log('🔄 Starting background recalculation of all product prices...');
-    
+
     // Fetch all products that have a supplierCost set (to avoid messing up legacy products without costs)
     const products = await prisma.product.findMany({
       where: {
+        wholesalerId: { not: null },
         supplierCost: { not: null }
-      }
+      } as any
     });
+
 
     const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
     const retailerMarkupPct = config?.retailerMarkup || 25;
@@ -2544,13 +2547,14 @@ const recalculateAllProductsBackground = async (config: any) => {
 
     let updatedCount = 0;
     for (const product of products) {
-      if (product.supplierCost === null || product.supplierCost === undefined) continue;
+      const prodAny = product as any;
+      if (prodAny.supplierCost === null || prodAny.supplierCost === undefined) continue;
 
-      const taxType = product.taxType || 'B';
+      const taxType = prodAny.taxType || 'B';
 
       // 1. Calculate Wholesaler Price
       const wholesalePricing = calculateWholesalePrice(
-        product.supplierCost,
+        prodAny.supplierCost,
         wholesalerMarkupPct,
         taxType,
         exciseDutyRatePct
@@ -2575,7 +2579,43 @@ const recalculateAllProductsBackground = async (config: any) => {
       updatedCount++;
     }
 
-    console.log(`✅ Background recalculation complete. Updated ${updatedCount} products.`);
+    console.log(`✅ Background recalculation complete for wholesaler products. Updated ${updatedCount} products.`);
+
+    // --- RETAILER PRODUCTS ---
+    console.log(`🔄 Starting background recalculation of retailer product prices...`);
+    const retailerProducts = await prisma.product.findMany({
+      where: {
+        retailerId: { not: null },
+        costPrice: { not: null }
+      }
+    });
+
+    console.log(`📦 Found ${retailerProducts.length} retailer products to recalculate. Using Markup: R=${retailerMarkupPct}%`);
+
+    let retailUpdatedCount = 0;
+    for (const rProduct of retailerProducts) {
+      const rProdAny = rProduct as any;
+      if (rProduct.costPrice === null || rProduct.costPrice === undefined) continue;
+
+      const taxType = rProdAny.taxType || 'B';
+
+      const retailPricing = calculateRetailPrice(
+        rProduct.costPrice,
+        retailerMarkupPct,
+        taxType,
+        exciseDutyRatePct
+      );
+
+      await prisma.product.update({
+        where: { id: rProduct.id },
+        data: {
+          price: retailPricing.finalConsumerShelfPrice
+        }
+      });
+      retailUpdatedCount++;
+    }
+
+    console.log(`✅ Background recalculation complete for retailer products. Updated ${retailUpdatedCount} products.`);
   } catch (error) {
     console.error('❌ Error during background product recalculation:', error);
   }
@@ -3454,9 +3494,10 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
 
       // Fetch SystemConfig for Retailer Inheritance Pipeline
       const config = await prisma.systemConfig.findFirst();
-      const wholesalerMarkupPct = config?.wholesalerMarkup || 20;
-      const retailerMarkupPct = config?.retailerMarkup || 20;
-      const exciseDutyRatePct = config?.exciseDutyRate || 10;
+      const configAny = config as any;
+      const wholesalerMarkupPct = configAny?.wholesalerMarkup || 20;
+      const retailerMarkupPct = configAny?.retailerMarkup || 20;
+      const exciseDutyRatePct = configAny?.exciseDutyRate || 10;
       const { calculateRetailPrice } = await import('../utils/pricingUtils');
 
       // 2. Update Retailer's Inventory
@@ -3491,9 +3532,10 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
           // Create new product for retailer based on wholesaler's product
 
           // Retailer Inheritance Pipeline
-          const supplierCost = item.product.supplierCost || item.product.costPrice || 0;
+          const prodAny = item.product as any;
+          const supplierCost = prodAny.supplierCost || item.product.costPrice || 0;
           const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
-          const taxType = item.product.taxType || 'B';
+          const taxType = prodAny.taxType || 'B';
 
           const retailPricing = calculateRetailPrice(
             cleanBaseCost,
