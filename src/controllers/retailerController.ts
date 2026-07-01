@@ -1501,7 +1501,8 @@ export const getDailySales = async (req: AuthRequest, res: Response) => {
       dashboard_wallet_transactions: dashboardWalletSales.size,
       credit_wallet_transactions: creditWalletSales.size,
       gas_rewards_m3: gasRewardsM3,
-      gas_rewards_rwf: Math.round(gasRewardsRwf)
+      gas_rewards_rwf: Math.round(gasRewardsRwf),
+      max_discount_pct: (config as any)?.maxDiscountPercentage || 5
     });
 
   } catch (error: any) {
