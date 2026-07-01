@@ -46,7 +46,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getRetailerWholesalerLinkage = exports.getWholesalerAccountDetails = exports.getWorkerAccountDetails = exports.getRetailerAccountDetails = exports.getCustomerAccountDetails = exports.updateSystemConfig = exports.getSystemConfig = exports.getRevenueReport = exports.getTransactionReport = exports.unlinkNFCCard = exports.activateNFCCard = exports.blockNFCCard = exports.getNFCCardTransactions = exports.registerNFCCard = exports.rejectLoan = exports.approveLoan = exports.deleteEmployee = exports.updateEmployee = exports.createEmployee = exports.getEmployees = exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProducts = exports.deleteCustomer = exports.updateCustomerStatus = exports.updateCustomer = exports.updateWholesalerStatus = exports.updateRetailerStatus = exports.deleteWholesaler = exports.updateWholesaler = exports.verifyWholesaler = exports.verifyRetailer = exports.deleteRetailer = exports.updateRetailer = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getCategories = exports.getNFCCards = exports.getLoans = exports.createWholesaler = exports.getWholesalers = exports.createRetailer = exports.getRetailers = exports.createCustomer = exports.getCustomer = exports.getCustomers = exports.getReports = exports.getDashboard = void 0;
-exports.acknowledgeAlert = exports.getSystemAlerts = exports.updateEmailEvent = exports.getEmailEvents = exports.sendManualEmail = exports.deleteEmailTemplate = exports.saveEmailTemplate = exports.getEmailTemplates = exports.resendEmail = exports.getEmailLogs = exports.confirmWholesaleDelivery = exports.deleteSettlementInvoice = exports.updateSettlementInvoice = exports.getSettlementInvoice = exports.createSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailerFromWholesaler = exports.linkRetailerToWholesaler = void 0;
+exports.getCustomerCreditLimit = exports.updateCustomerCreditLimit = exports.acknowledgeAlert = exports.getSystemAlerts = exports.updateEmailEvent = exports.getEmailEvents = exports.sendManualEmail = exports.deleteEmailTemplate = exports.saveEmailTemplate = exports.getEmailTemplates = exports.resendEmail = exports.getEmailLogs = exports.confirmWholesaleDelivery = exports.deleteSettlementInvoice = exports.updateSettlementInvoice = exports.getSettlementInvoice = exports.createSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailerFromWholesaler = exports.linkRetailerToWholesaler = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const cloudinary_1 = require("../utils/cloudinary");
 const auth_1 = require("../utils/auth");
@@ -1566,16 +1566,11 @@ exports.getProducts = getProducts;
 // Create product
 const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description, sku, category, price, costPrice, retailerPrice, stock, unit, lowStockThreshold, invoiceNumber, barcode, wholesalerId, retailerId, image, baseUnit, purchaseUnit, conversionFactor } = req.body;
+        const { name, description, sku, category, price, costPrice, retailerPrice, stock, unit, lowStockThreshold, invoiceNumber, barcode, wholesalerId, retailerId, image } = req.body;
         // Upload to Cloudinary if image is provided as base64
         let imageUrl = image;
         if (image && image.startsWith('data:image')) {
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
-        }
-        const parsedConversionFactor = conversionFactor ? parseFloat(conversionFactor) : null;
-        let finalStock = parseInt(stock) || 0;
-        if (parsedConversionFactor && parsedConversionFactor > 0 && purchaseUnit && baseUnit) {
-            finalStock = finalStock * parsedConversionFactor;
         }
         const product = yield prisma_1.default.product.create({
             data: {
@@ -1586,11 +1581,8 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 price: parseFloat(price),
                 costPrice: costPrice ? parseFloat(costPrice) : null,
                 retailerPrice: retailerPrice ? parseFloat(retailerPrice) : null,
-                stock: finalStock,
+                stock: parseInt(stock) || 0,
                 unit,
-                baseUnit,
-                purchaseUnit,
-                conversionFactor: parsedConversionFactor,
                 lowStockThreshold: lowStockThreshold ? parseInt(lowStockThreshold) : null,
                 invoiceNumber,
                 barcode,
@@ -1612,7 +1604,7 @@ exports.createProduct = createProduct;
 const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const { name, description, sku, category, price, costPrice, retailerPrice, unit, lowStockThreshold, invoiceNumber, barcode, status, image, baseUnit, purchaseUnit, conversionFactor } = req.body;
+        const { name, description, sku, category, price, costPrice, retailerPrice, unit, lowStockThreshold, invoiceNumber, barcode, status, image } = req.body;
         const targetProduct = yield prisma_1.default.product.findUnique({ where: { id: Number(id) } });
         if (!targetProduct) {
             return res.status(404).json({ error: 'Product not found' });
@@ -1623,7 +1615,6 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (image && image.startsWith('data:image')) {
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
         }
-        const parsedConversionFactor = conversionFactor ? parseFloat(conversionFactor) : null;
         // Update Wholesaler products (where retailerId is null)
         yield prisma_1.default.product.updateMany({
             where: Object.assign(Object.assign({}, whereClause), { retailerId: null }),
@@ -1632,9 +1623,7 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 sku,
                 category, price: price ? parseFloat(price) : undefined, costPrice: costPrice !== undefined ? (costPrice ? parseFloat(costPrice) : null) : undefined, retailerPrice: retailerPrice !== undefined ? (retailerPrice ? parseFloat(retailerPrice) : null) : undefined, 
                 // Note: stock is NOT updated here because it's managed individually by wholesalers
-                unit,
-                baseUnit,
-                purchaseUnit, conversionFactor: parsedConversionFactor, lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined, invoiceNumber,
+                unit, lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined, invoiceNumber,
                 barcode,
                 status }, (imageUrl ? { image: imageUrl } : {}))
         });
@@ -1646,9 +1635,7 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 sku,
                 category, 
                 // For retailers, Selling Price is the Retailer Price, and Cost Price is the Wholesaler Price
-                price: retailerPrice ? parseFloat(retailerPrice) : undefined, costPrice: price ? parseFloat(price) : undefined, unit,
-                baseUnit,
-                purchaseUnit, conversionFactor: parsedConversionFactor, lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined, invoiceNumber,
+                price: retailerPrice ? parseFloat(retailerPrice) : undefined, costPrice: price ? parseFloat(price) : undefined, unit, lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined, invoiceNumber,
                 barcode,
                 status }, (imageUrl ? { image: imageUrl } : {}))
         });
@@ -3164,9 +3151,14 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
                 });
                 if (existingProduct) {
                     // Update existing stock
+                    const conversionFactor = existingProduct.conversionFactor ? Number(existingProduct.conversionFactor) : null;
+                    let addStock = item.quantity;
+                    if (conversionFactor && conversionFactor > 0) {
+                        addStock = item.quantity * conversionFactor;
+                    }
                     yield tx.product.update({
                         where: { id: existingProduct.id },
-                        data: { stock: { increment: item.quantity } }
+                        data: { stock: { increment: addStock } }
                     });
                 }
                 else {
@@ -3176,6 +3168,11 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
                     const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
                     const taxType = item.product.taxType || 'B';
                     const retailPricing = calculateRetailPrice(cleanBaseCost, retailerMarkupPct, taxType, exciseDutyRatePct);
+                    const conversionFactor = item.product.conversionFactor ? Number(item.product.conversionFactor) : null;
+                    let addStock = item.quantity;
+                    if (conversionFactor && conversionFactor > 0) {
+                        addStock = item.quantity * conversionFactor;
+                    }
                     yield tx.product.create({
                         data: {
                             name: item.product.name,
@@ -3185,9 +3182,12 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
                             category: item.product.category,
                             price: retailPricing.finalConsumerShelfPrice, // Module 2 generated Final Consumer Shelf Price
                             costPrice: cleanBaseCost, // Retailer's cost basis (Taxes stripped out)
-                            stock: item.quantity,
+                            stock: addStock,
                             retailerId: updatedOrder.retailerId,
                             unit: item.product.unit,
+                            baseUnit: item.product.baseUnit,
+                            purchaseUnit: item.product.purchaseUnit,
+                            conversionFactor: item.product.conversionFactor,
                             status: 'active',
                             taxType: taxType,
                             supplierCost: item.product.price // The actual invoice amount they paid for the stock
@@ -3297,13 +3297,23 @@ exports.getEmailTemplates = getEmailTemplates;
  */
 const saveEmailTemplate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, subject, content, description, isActive, portal, triggerName } = req.body;
+        const { name, subject, content, description, isActive, portal, triggerName, channel } = req.body;
         // @ts-ignore
         const template = yield prisma_1.default.emailTemplate.upsert({
             where: { name },
-            update: { subject, content, description, isActive, portal, triggerName },
-            create: { name, subject, content, description, isActive, portal, triggerName }
+            update: { subject, content, description, isActive, portal, triggerName, channel },
+            create: { name, subject, content, description, isActive, portal, triggerName, channel }
         });
+        // Auto-map event slug if triggerName is provided to ensure delivery/trigger
+        if (triggerName) {
+            const eventSlug = triggerName.trim();
+            // @ts-ignore
+            yield prisma_1.default.emailEvent.upsert({
+                where: { eventSlug },
+                update: { templateName: name, description: `Auto-mapped event for template ${name}` },
+                create: { eventSlug, templateName: name, description: `Auto-mapped event for template ${name}` }
+            });
+        }
         res.json({ success: true, template, message: 'Template saved successfully' });
     }
     catch (error) {
@@ -3483,3 +3493,38 @@ const acknowledgeAlert = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.acknowledgeAlert = acknowledgeAlert;
+const updateCustomerCreditLimit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params; // ConsumerProfile ID
+        const { creditLimit } = req.body;
+        if (creditLimit === undefined || isNaN(parseFloat(creditLimit)) || parseFloat(creditLimit) < 0) {
+            return res.status(400).json({ success: false, error: 'Invalid credit limit amount' });
+        }
+        const profile = yield prisma_1.default.consumerProfile.update({
+            where: { id: Number(id) },
+            data: { creditLimit: parseFloat(creditLimit) }
+        });
+        res.json({ success: true, profile, message: 'Customer credit limit updated successfully' });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.updateCustomerCreditLimit = updateCustomerCreditLimit;
+const getCustomerCreditLimit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params; // ConsumerProfile ID
+        const profile = yield prisma_1.default.consumerProfile.findUnique({
+            where: { id: Number(id) },
+            include: { user: { select: { name: true, email: true, phone: true } } }
+        });
+        if (!profile) {
+            return res.status(404).json({ success: false, error: 'Customer profile not found' });
+        }
+        res.json({ success: true, creditLimit: profile.creditLimit || 50000, profile });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.getCustomerCreditLimit = getCustomerCreditLimit;

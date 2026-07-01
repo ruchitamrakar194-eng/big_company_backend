@@ -159,8 +159,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 log(`Reward will be credited to consumer ID: ${rewardConsumerId}`);
             }
             else {
-                log(`Gas Reward Wallet ID ${gasRewardWalletId} is invalid, defaulting to shopper's own account: ${rewardConsumerId}`);
-                targetRewardId = consumerProfile.gasRewardWalletId || meterId;
+                log(`Gas Reward Wallet ID ${gasRewardWalletId} is invalid`);
+                return res.status(400).json({ error: `Invalid Gas Reward Wallet ID: ${gasRewardWalletId}` });
             }
         }
         log('Calculating amount to pay...');
@@ -1095,9 +1095,10 @@ const applyForLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (existingActiveLoans.length > 0) {
             return res.status(400).json({ error: 'You have a pending or active outstanding loan. Please pay it off in full first.' });
         }
-        // Customer credit limit check (e.g. 50,000 RWF or custom if we have it)
-        if (amount > 50000) {
-            return res.status(400).json({ error: 'Amount exceeds maximum limit' });
+        // Customer credit limit check (using database configured limit, defaulting to 50,000 RWF)
+        const limit = consumerProfile.creditLimit !== undefined ? consumerProfile.creditLimit : 50000;
+        if (amount > limit) {
+            return res.status(400).json({ error: `Amount exceeds maximum credit limit of ${limit.toLocaleString()} RWF` });
         }
         const result = yield prisma_1.default.$transaction((prisma) => __awaiter(void 0, void 0, void 0, function* () {
             // 1. Create loan record (Status: pending, awaits Admin approval)
@@ -1302,8 +1303,19 @@ const getActiveLoanLedger = (req, res) => __awaiter(void 0, void 0, void 0, func
             where: { reference: loan.id.toString(), type: 'loan_repayment_replenish' }
         });
         const paidAmount = repayments.reduce((sum, t) => sum + t.amount, 0);
-        const totalAmount = loan.amount; // Assuming 0 interest for now based on schema
-        const interestRate = 0; // Fixed for now
+        let rates = {};
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            const p = path.join(process.cwd(), 'data', 'system_rates.json');
+            if (fs.existsSync(p)) {
+                rates = JSON.parse(fs.readFileSync(p, 'utf8'));
+            }
+        }
+        catch (e) { }
+        const interestRate = Number(rates.customerInterestRate) || 10;
+        const interestAmount = Math.round(loan.amount * (interestRate / 100));
+        const totalAmount = loan.amount + interestAmount;
         const outstandingBalance = Math.max(0, totalAmount - paidAmount);
         // Generate Schedule (Synthetic 4 weeks)
         const schedule = [];
@@ -1344,6 +1356,7 @@ const getActiveLoanLedger = (req, res) => __awaiter(void 0, void 0, void 0, func
             id: loan.id,
             loan_number: `LOAN-${loan.createdAt.getFullYear()}-${loan.id.toString().padStart(4, '0')}`,
             amount: loan.amount,
+            interest_amount: interestAmount,
             disbursed_date: loan.createdAt.toISOString(),
             repayment_frequency: 'weekly',
             interest_rate: interestRate,

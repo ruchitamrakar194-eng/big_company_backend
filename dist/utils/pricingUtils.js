@@ -3,7 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.bankersRound = bankersRound;
 exports.calculateWholesalePrice = calculateWholesalePrice;
 exports.calculateRetailPrice = calculateRetailPrice;
-exports.reverseTaxFromInclusive = reverseTaxFromInclusive;
 function bankersRound(num) {
     const d = num * 1;
     const i = Math.floor(d);
@@ -78,30 +77,5 @@ function calculateRetailPrice(cleanBaseCost, retailerMarkupPct, taxType, exciseD
         vatAmount,
         taxAmount: tax,
         finalConsumerShelfPrice
-    };
-}
-function reverseTaxFromInclusive(inclusivePrice, taxType, exciseDutyRatePct) {
-    let preTaxPrice = inclusivePrice;
-    let exciseAmount = 0;
-    let vatAmount = 0;
-    let taxAmount = 0;
-    if (taxType === 'B') {
-        preTaxPrice = bankersRound(inclusivePrice / 1.18);
-        vatAmount = bankersRound(preTaxPrice * 0.18);
-        taxAmount = vatAmount;
-    }
-    else if (taxType === 'D') {
-        const divisor = 1.18 * (1 + exciseDutyRatePct / 100);
-        preTaxPrice = bankersRound(inclusivePrice / divisor);
-        exciseAmount = bankersRound(preTaxPrice * (exciseDutyRatePct / 100));
-        vatAmount = bankersRound((preTaxPrice + exciseAmount) * 0.18);
-        taxAmount = exciseAmount + vatAmount;
-    }
-    return {
-        preTaxPrice,
-        exciseAmount,
-        vatAmount,
-        taxAmount,
-        finalPrice: inclusivePrice
     };
 }

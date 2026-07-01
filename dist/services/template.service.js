@@ -128,10 +128,11 @@ class TemplateService {
                 if (dbTemplate) {
                     const subject = this.render(dbTemplate.subject, data);
                     const content = this.render(dbTemplate.content, data);
-                    const isSMS = templateName.includes('SMS') || nameOrSlug.includes('SMS');
+                    const isSMS = dbTemplate.channel === 'SMS' || templateName.includes('SMS') || nameOrSlug.includes('SMS');
                     return {
                         subject,
-                        html: isSMS ? content : this.wrap(content, 'BIG Ltd')
+                        html: isSMS ? content : this.wrap(content, 'BIG Ltd'),
+                        isSMS
                     };
                 }
             }

@@ -102,7 +102,7 @@ exports.emailWorker = new bullmq_1.Worker('email-queue', (job) => __awaiter(void
             }
         }
         catch (err) { }
-        const isSMS = resolvedTemplateName.includes('SMS') || (templateType && templateType.includes('SMS'));
+        let isSMS = resolvedTemplateName.includes('SMS') || (templateType && templateType.includes('SMS'));
         // If data is provided, we MUST use the TemplateService to get the content
         // This ensures we use the DB-stored templates if they exist (Requirement 4.2.1)
         if (data) {
@@ -112,6 +112,9 @@ exports.emailWorker = new bullmq_1.Worker('email-queue', (job) => __awaiter(void
             const template = yield TemplateService.getTemplate(resolvedTemplateName, data);
             finalSubject = template.subject;
             finalHtml = template.html;
+            if (template.isSMS !== undefined) {
+                isSMS = template.isSMS;
+            }
         }
         // ROUTING LOGIC: If resolved template name contains SMS, send via SMSService
         if (isSMS) {

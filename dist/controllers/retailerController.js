@@ -73,7 +73,7 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         startOfWeek.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1)); // Monday
         startOfWeek.setHours(0, 0, 0, 0);
         // Fetch data in parallel
-        const [todaySales, allSales, inventory, pendingOrders, gasRewardsAggregate] = yield Promise.all([
+        const [todaySales, allSales, inventory, pendingOrders, gasRewardsAggregate, systemConfig] = yield Promise.all([
             // Today's Sales
             prisma_1.default.sale.findMany({
                 where: {
@@ -106,7 +106,8 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 _sum: {
                     units: true
                 }
-            })
+            }),
+            prisma_1.default.systemConfig.findFirst()
         ]);
         // Calculate Stats
         // DYNAMIC PROFIT CALCULATION (Realized form Sales)
@@ -267,7 +268,7 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 mobileMoneyRevenue: paymentStats['momo'] || 0,
                 cashRevenue: paymentStats['cash'] || 0,
                 gasRewardsGiven: gasRewardsAggregate._sum.units || 0,
-                gasRewardsValue: (gasRewardsAggregate._sum.units || 0) * 50000
+                gasRewardsValue: Math.round((gasRewardsAggregate._sum.units || 0) * ((systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.gasPricePerM3) || 6500))
             },
             // Lists
             salesData: chartData,
@@ -313,7 +314,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!retailerProfile) {
             return res.status(404).json({ error: 'Retailer profile not found' });
         }
-        const { invoice_number, name, description, sku, category, price, costPrice, stock, image } = req.body;
+        const { invoice_number, name, description, sku, category, price, costPrice, stock, image, baseUnit, purchaseUnit, conversionFactor, taxType } = req.body;
         // --- Invoice Flow ---
         if (invoice_number) {
             // Find the order by ID (treating invoice_number as Order ID)
@@ -369,23 +370,21 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                         ]
                     }
                 });
+                const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+                const taxType = sourceProduct.taxType || 'B';
+                const reversedCost = reverseVATCalculation(item.price, taxType);
+                const cleanCost = reversedCost.cleanBaseCost;
                 if (existingProduct) {
-                    const factor = existingProduct.conversionFactor || sourceProduct.conversionFactor;
-                    const incrementStock = (factor && factor > 0 && (existingProduct.purchaseUnit || sourceProduct.purchaseUnit) && (existingProduct.baseUnit || sourceProduct.baseUnit))
-                        ? item.quantity * factor
-                        : item.quantity;
+                    const conversionFactor = existingProduct.conversionFactor ? Number(existingProduct.conversionFactor) : null;
+                    let addStock = item.quantity;
+                    if (conversionFactor && conversionFactor > 0) {
+                        addStock = item.quantity * conversionFactor;
+                    }
                     const updateData = {
-                        stock: { increment: incrementStock },
-                        costPrice: item.price,
+                        stock: { increment: addStock },
+                        costPrice: cleanCost,
                         status: 'active',
-<<<<<<< HEAD
-                        barcode: sourceProduct.barcode, // Ensure barcode is set/updated
-                        baseUnit: existingProduct.baseUnit || sourceProduct.baseUnit,
-                        purchaseUnit: existingProduct.purchaseUnit || sourceProduct.purchaseUnit,
-                        conversionFactor: existingProduct.conversionFactor || sourceProduct.conversionFactor,
-=======
                         barcode: sourceProduct.barcode // Ensure barcode is set/updated
->>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
                     };
                     if (!existingProduct.retailerId) {
                         updateData.retailerId = retailerProfile.id;
@@ -398,19 +397,27 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 }
                 else {
                     // Create new inventory item
-                    const factor = sourceProduct.conversionFactor;
-                    const inheritedStock = (factor && factor > 0 && sourceProduct.purchaseUnit && sourceProduct.baseUnit)
-                        ? item.quantity * factor
-                        : item.quantity;
+                    const conversionFactor = sourceProduct.conversionFactor ? Number(sourceProduct.conversionFactor) : null;
+                    let addStock = item.quantity;
+                    if (conversionFactor && conversionFactor > 0) {
+                        addStock = item.quantity * conversionFactor;
+                    }
+                    // Calculate final retail price: (cost + markup) + 18% VAT for Type B products
+                    const config = yield prisma_1.default.systemConfig.findFirst();
+                    const retailerMarkup = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
+                    const invoiceTaxType = sourceProduct.taxType || 'B';
+                    const invoiceMarkupPrice = cleanCost * (1 + retailerMarkup / 100);
+                    const invoiceVatMultiplier = invoiceTaxType === 'B' ? 1.18 : 1;
+                    const invoiceFinalPrice = sourceProduct.retailerPrice || Math.ceil(invoiceMarkupPrice * invoiceVatMultiplier);
                     const newProduct = yield prisma_1.default.product.create({
                         data: {
                             name: sourceProduct.name,
                             description: sourceProduct.description,
                             sku: sourceProduct.sku,
                             category: sourceProduct.category,
-                            price: sourceProduct.retailerPrice || (sourceProduct.price * 1.2), // Default markup 20% if no retailerPrice set
-                            costPrice: item.price, // Cost is what they paid in the order
-                            stock: inheritedStock,
+                            price: invoiceFinalPrice,
+                            costPrice: cleanCost, // Cost is what they paid in the order, reversed pre-tax
+                            stock: addStock,
                             unit: sourceProduct.unit,
                             baseUnit: sourceProduct.baseUnit,
                             purchaseUnit: sourceProduct.purchaseUnit,
@@ -427,7 +434,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
             return res.json({ success: true, count: createdProducts.length + updatedProducts.length, message: `Imported ${createdProducts.length} new items and updated ${updatedProducts.length} items from invoice` });
         }
-        const { baseUnit, purchaseUnit, conversionFactor } = req.body;
+        // --- Manual Flow (Single Product) ---
         // Validate required fields for manual creation
         if (!name || !price) {
             return res.status(400).json({ error: 'Name and Price are required for manual creation' });
@@ -445,10 +452,16 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 return res.status(400).json({ error: 'A product with this SKU already exists in your inventory.' });
             }
         }
-        const parsedConversionFactor = conversionFactor ? parseFloat(conversionFactor) : null;
-        let finalStock = stock ? parseFloat(stock) : 0;
-        if (parsedConversionFactor && parsedConversionFactor > 0 && purchaseUnit && baseUnit) {
-            finalStock = finalStock * parsedConversionFactor;
+        const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+        let cleanCostPrice = costPrice ? parseFloat(costPrice) : undefined;
+        if (cleanCostPrice !== undefined) {
+            const reversed = reverseVATCalculation(cleanCostPrice, taxType || 'B');
+            cleanCostPrice = reversed.cleanBaseCost;
+        }
+        const parsedConversion = conversionFactor ? parseFloat(conversionFactor) : null;
+        let calculatedStock = stock ? parseFloat(stock) : 0;
+        if (parsedConversion && parsedConversion > 0) {
+            calculatedStock = calculatedStock * parsedConversion;
         }
         const product = yield prisma_1.default.product.create({
             data: {
@@ -457,18 +470,15 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 sku,
                 category: category || 'General',
                 price: parseFloat(price),
-                costPrice: costPrice ? parseFloat(costPrice) : undefined,
-<<<<<<< HEAD
-                stock: finalStock,
-                baseUnit,
-                purchaseUnit,
-                conversionFactor: parsedConversionFactor,
-=======
-                stock: stock ? parseFloat(stock) : 0,
->>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
+                costPrice: cleanCostPrice,
+                stock: calculatedStock,
                 image: imageUrl,
                 retailerId: retailerProfile.id,
-                barcode: sku // Save sku as barcode for manual entry POS scanning
+                barcode: sku, // Save sku as barcode for manual entry POS scanning
+                baseUnit,
+                purchaseUnit,
+                conversionFactor: parsedConversion,
+                taxType: taxType || 'B'
             }
         });
         res.json({ success: true, product });
@@ -483,7 +493,7 @@ exports.createProduct = createProduct;
 const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const { name, description, category, price, costPrice, stock, image, sku, baseUnit, purchaseUnit, conversionFactor } = req.body;
+        const { name, description, category, price, costPrice, stock, image, sku, baseUnit, purchaseUnit, conversionFactor, taxType } = req.body;
         // Validate SKU uniqueness
         if (sku) {
             const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
@@ -503,6 +513,23 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (image && image.startsWith('data:image')) {
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
         }
+        const currentProduct = yield prisma_1.default.product.findUnique({ where: { id: Number(id) } });
+        let cleanCostPrice = costPrice !== undefined ? parseFloat(costPrice) : undefined;
+        if (cleanCostPrice !== undefined && cleanCostPrice !== null) {
+            const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+            const resolvedTaxType = taxType || (currentProduct === null || currentProduct === void 0 ? void 0 : currentProduct.taxType) || 'B';
+            const reversed = reverseVATCalculation(cleanCostPrice, resolvedTaxType);
+            cleanCostPrice = reversed.cleanBaseCost;
+        }
+        const parsedConversion = conversionFactor !== undefined ? (conversionFactor ? parseFloat(conversionFactor) : null) : undefined;
+        let calculatedStock = stock !== undefined ? parseFloat(stock) : undefined;
+        // If updating stock manually and conversion factor is provided (either updated or existing)
+        if (calculatedStock !== undefined) {
+            const activeConversion = parsedConversion !== undefined ? parsedConversion : currentProduct === null || currentProduct === void 0 ? void 0 : currentProduct.conversionFactor;
+            if (activeConversion && activeConversion > 0) {
+                calculatedStock = calculatedStock * activeConversion;
+            }
+        }
         const product = yield prisma_1.default.product.update({
             where: { id: Number(id) },
             data: {
@@ -510,17 +537,15 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 description,
                 category,
                 price: price ? parseFloat(price) : undefined,
-                costPrice: costPrice ? parseFloat(costPrice) : undefined,
-                stock: stock !== undefined ? parseFloat(stock) : undefined,
-<<<<<<< HEAD
-                baseUnit,
-                purchaseUnit,
-                conversionFactor: conversionFactor ? parseFloat(conversionFactor) : null,
-=======
->>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
+                costPrice: cleanCostPrice,
+                stock: calculatedStock,
                 image: imageUrl,
                 sku: sku !== undefined ? sku : undefined,
-                barcode: sku !== undefined ? sku : undefined // Update barcode with sku
+                barcode: sku !== undefined ? sku : undefined, // Update barcode with sku
+                baseUnit: baseUnit !== undefined ? baseUnit : undefined,
+                purchaseUnit: purchaseUnit !== undefined ? purchaseUnit : undefined,
+                conversionFactor: parsedConversion,
+                taxType: taxType !== undefined ? taxType : undefined
             }
         });
         res.json({ success: true, product });
@@ -822,8 +847,7 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const { items, payment_method, // 'cash', 'nfc', 'wallet', 'momo'
         subtotal, tax_amount, discount, customer_phone, payment_details // { pin, uid } for NFC
          } = req.body;
-<<<<<<< HEAD
-        const total = (subtotal + tax_amount - (discount || 0));
+        const total = (subtotal - (discount || 0));
         // --- Module 5: The Sales Discount Safeguard System ---
         if (discount && discount > 0 && subtotal > 0) {
             const config = yield prisma_1.default.systemConfig.findFirst();
@@ -836,9 +860,16 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             }
         }
         // --- End Module 5 ---
-=======
-        const total = (subtotal - (discount || 0));
->>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
+        // Validate Gas Reward Wallet ID if provided
+        const { gasRewardWalletId } = req.body;
+        if (gasRewardWalletId) {
+            const rewardConsumer = yield prisma_1.default.consumerProfile.findFirst({
+                where: { gasRewardWalletId: gasRewardWalletId }
+            });
+            if (!rewardConsumer) {
+                return res.status(400).json({ error: `Invalid Gas Reward Wallet ID: ${gasRewardWalletId}` });
+            }
+        }
         // 1. Validate items and stock
         const productIds = items.map((item) => Number(item.product_id));
         const products = yield prisma_1.default.product.findMany({
@@ -1879,17 +1910,54 @@ const requestCredit = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return res.status(404).json({ error: 'Retailer profile not found' });
         }
         const { amount, reason } = req.body;
-        if (!amount || amount <= 0) {
+        const parsedAmount = parseFloat(amount);
+        if (!amount || parsedAmount <= 0) {
             return res.status(400).json({ error: 'Invalid amount' });
         }
-        // Check if there is an active outstanding loan
+        // Check effective Credit Limit set by wholesaler
         const credit = yield prisma_1.default.retailerCredit.findUnique({
             where: { retailerId: retailerProfile.id }
         });
+        const creditLimit = credit ? credit.creditLimit : retailerProfile.creditLimit;
+        if (parsedAmount > creditLimit) {
+            return res.status(400).json({
+                error: `Requested amount exceeds your credit limit of ${creditLimit.toLocaleString()} RWF.`
+            });
+        }
+        // Check if there is already a pending credit request
+        const pendingRequest = yield prisma_1.default.creditRequest.findFirst({
+            where: { retailerId: retailerProfile.id, status: 'pending' }
+        });
+        if (pendingRequest) {
+            return res.status(400).json({
+                error: 'You already have a pending credit request. Please wait for it to be processed.'
+            });
+        }
+        // Check if there is an active outstanding loan
         if (credit && credit.usedCredit > 0) {
             return res.status(400).json({
                 error: 'You have an active outstanding loan. You must repay your current loan in full before requesting a new one.'
             });
+        }
+        // Single Active Credit Rule: check if there is an approved loan that has not yet been used
+        const latestApprovedRequest = yield prisma_1.default.creditRequest.findFirst({
+            where: { retailerId: retailerProfile.id, status: 'approved' },
+            orderBy: { updatedAt: 'desc' }
+        });
+        if (latestApprovedRequest) {
+            // Check if they placed any credit orders since this latest request was approved
+            const creditOrdersCount = yield prisma_1.default.order.count({
+                where: {
+                    retailerId: retailerProfile.id,
+                    paymentMethod: 'credit',
+                    createdAt: { gte: latestApprovedRequest.updatedAt || latestApprovedRequest.createdAt }
+                }
+            });
+            if (creditOrdersCount === 0) {
+                return res.status(400).json({
+                    error: 'You already have an active approved credit limit that has not been used yet.'
+                });
+            }
         }
         // Create CreditRequest
         const creditRequest = yield prisma_1.default.creditRequest.create({
@@ -1998,7 +2066,8 @@ const makeRepayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 yield prisma.retailerCredit.update({
                     where: { retailerId: retailerProfile.id },
                     data: {
-                        usedCredit: { decrement: amount }
+                        usedCredit: { decrement: amount },
+                        availableCredit: { increment: amount }
                     }
                 });
             }
@@ -2069,7 +2138,8 @@ const payCredit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 yield tx.retailerCredit.update({
                     where: { retailerId: retailerProfile.id },
                     data: {
-                        usedCredit: { decrement: amount }
+                        usedCredit: { decrement: amount },
+                        availableCredit: { increment: amount }
                     }
                 });
             }
@@ -3299,6 +3369,13 @@ const confirmPurchaseOrderDelivery = (req, res) => __awaiter(void 0, void 0, voi
                 }
                 else {
                     // Create new product for retailer based on wholesaler's product
+                    // Calculate final retail price: (cost + markup) + 18% VAT for Type B products
+                    const config = yield tx.systemConfig.findFirst();
+                    const retailerMarkup = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
+                    const orderTaxType = item.product.taxType || 'B';
+                    const orderMarkupPrice = item.price * (1 + retailerMarkup / 100);
+                    const orderVatMultiplier = orderTaxType === 'B' ? 1.18 : 1;
+                    const orderFinalPrice = Math.ceil(orderMarkupPrice * orderVatMultiplier);
                     yield tx.product.create({
                         data: {
                             name: item.product.name,
@@ -3306,8 +3383,8 @@ const confirmPurchaseOrderDelivery = (req, res) => __awaiter(void 0, void 0, voi
                             sku: item.product.sku,
                             barcode: item.product.barcode,
                             category: item.product.category,
-                            price: item.product.price * 1.2, // Default 20% markup for retailer if new
-                            costPrice: item.product.price, // Wholesaler's price is retailer's cost
+                            price: orderFinalPrice, // (Cost + 20% markup) + 18% VAT
+                            costPrice: item.price, // True acquisition cost from the order
                             stock: item.quantity,
                             retailerId: retailerProfile.id,
                             unit: item.product.unit,
@@ -3371,18 +3448,21 @@ const getGasRewardsGiven = (req, res) => __awaiter(void 0, void 0, void 0, funct
             }
         });
         // Calculate total m3 and value
-        const aggregate = yield prisma_1.default.gasReward.aggregate({
-            where: {
-                sale: {
-                    retailerId: retailerProfile.id
+        const [aggregate, systemConfig] = yield Promise.all([
+            prisma_1.default.gasReward.aggregate({
+                where: {
+                    sale: {
+                        retailerId: retailerProfile.id
+                    }
+                },
+                _sum: {
+                    units: true
                 }
-            },
-            _sum: {
-                units: true
-            }
-        });
+            }),
+            prisma_1.default.systemConfig.findFirst()
+        ]);
         const totalM3 = aggregate._sum.units || 0;
-        const totalValue = totalM3 * 50000; // Assuming 50000 RWF per M3 value for metrics
+        const totalValue = Math.round(totalM3 * ((systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.gasPricePerM3) || 6500));
         const formattedRewards = rewards.map(r => {
             var _a, _b, _c, _d;
             return ({

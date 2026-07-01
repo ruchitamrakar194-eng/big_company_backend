@@ -366,23 +366,32 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const { name, description, sku, category, wholesale_price, // Frontend sends wholesale_price
         cost_price, // Frontend sends cost_price
         stock, unit, low_stock_threshold, invoice_number, barcode, image, // Base64 string from frontend
-        taxType, supplierCost, baseUnit, purchaseUnit, conversionFactor } = req.body;
+        taxType, supplierCost, baseUnit, purchaseUnit, conversionFactor, costPerPurchaseUnit } = req.body;
         // Validate required fields
-<<<<<<< HEAD
-        if (!name || !category || !barcode || !supplierCost) {
+        if (!name || !category || !barcode || (!supplierCost && !costPerPurchaseUnit)) {
             console.error('❌ Missing required fields');
             return res.status(400).json({
                 error: 'Missing required fields',
-                required: ['name', 'category', 'barcode', 'supplierCost'],
-                received: { name, category, barcode, supplierCost }
-=======
-        if (!name || !category || !wholesale_price || !barcode) {
-            console.error('❌ Missing required fields');
+                required: ['name', 'category', 'barcode', 'supplierCost or costPerPurchaseUnit'],
+                received: { name, category, barcode, supplierCost, costPerPurchaseUnit }
+            });
+        }
+        // Validate or auto-generate SKU
+        let finalSku = sku;
+        if (!finalSku || finalSku.trim() === '') {
+            finalSku = `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        }
+        else {
+            finalSku = finalSku.trim();
+        }
+        // Validate SKU uniqueness globally
+        const duplicateSku = yield prisma_1.default.product.findFirst({
+            where: { sku: finalSku }
+        });
+        if (duplicateSku) {
+            console.error('❌ Duplicate SKU:', finalSku);
             return res.status(400).json({
-                error: 'Missing required fields',
-                required: ['name', 'category', 'wholesale_price', 'barcode'],
-                received: { name, category, wholesale_price, barcode }
->>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
+                error: 'A product with this SKU already exists. SKU must be unique globally.'
             });
         }
         // Validate barcode uniqueness
@@ -397,15 +406,9 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 });
             }
         }
-<<<<<<< HEAD
         // Validate wholesale_price is a valid number if provided (legacy support)
         const parsedPrice = wholesale_price ? parseFloat(wholesale_price) : 0;
         if (wholesale_price && (isNaN(parsedPrice) || parsedPrice < 0)) {
-=======
-        // Validate wholesale_price is a valid number
-        const parsedPrice = parseFloat(wholesale_price);
-        if (isNaN(parsedPrice) || parsedPrice < 0) {
->>>>>>> 8dbaf6ec77c7e4565ce899478e8945d85e6bcd19
             console.error('❌ Invalid wholesale_price:', wholesale_price);
             return res.status(400).json({
                 error: 'Invalid wholesale price',
@@ -424,17 +427,24 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         // Validate taxType
         const validTaxTypes = ['A', 'B', 'C', 'D'];
         const parsedTaxType = taxType && validTaxTypes.includes(taxType) ? taxType : 'B';
-        // Parse supplierCost
-        const parsedSupplierCost = supplierCost ? parseFloat(supplierCost) : undefined;
-        if (supplierCost && (isNaN(parsedSupplierCost) || parsedSupplierCost < 0)) {
-            console.error('❌ Invalid supplierCost:', supplierCost);
+        const parsedConversion = conversionFactor ? parseFloat(conversionFactor) : null;
+        const parsedCostPerPurchaseUnit = costPerPurchaseUnit ? parseFloat(costPerPurchaseUnit) : undefined;
+        let parsedSupplierCost = supplierCost ? parseFloat(supplierCost) : undefined;
+        if (parsedCostPerPurchaseUnit !== undefined && parsedConversion && parsedConversion > 0) {
+            parsedSupplierCost = parsedCostPerPurchaseUnit / parsedConversion;
+        }
+        if (parsedSupplierCost !== undefined && (isNaN(parsedSupplierCost) || parsedSupplierCost < 0)) {
+            console.error('❌ Invalid supplierCost / costPerPurchaseUnit:', { supplierCost, costPerPurchaseUnit });
             return res.status(400).json({
-                error: 'Invalid supplier cost',
-                details: 'Supplier cost must be a positive number'
+                error: 'Invalid cost input',
+                details: 'Supplier cost or Cost per Purchase Unit must be a positive number'
             });
         }
         // Parse stock
-        const parsedStock = stock ? parseFloat(stock) : 0;
+        let parsedStock = stock ? parseFloat(stock) : 0;
+        if (parsedConversion && parsedConversion > 0 && req.body.stockInPurchaseUnits) {
+            parsedStock = parsedStock * parsedConversion;
+        }
         if (stock && (isNaN(parsedStock) || parsedStock < 0)) {
             console.error('❌ Invalid stock:', stock);
             return res.status(400).json({
@@ -464,7 +474,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         console.log('📦 Creating product with data:', {
             name,
             description,
-            sku,
+            sku: finalSku,
             category,
             price: finalCalculatedPrice,
             costPrice: parsedCostPrice,
@@ -483,31 +493,26 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             imageUrl = yield (0, cloudinary_1.uploadImage)(image);
             console.log('✅ Image uploaded:', imageUrl);
         }
-        const parsedConversionFactor = conversionFactor ? parseFloat(conversionFactor) : null;
-        let finalStock = parsedStock;
-        if (parsedConversionFactor && parsedConversionFactor > 0 && purchaseUnit && baseUnit) {
-            finalStock = parsedStock * parsedConversionFactor;
-        }
         const product = yield prisma_1.default.product.create({
             data: {
                 name,
                 description,
-                sku,
+                sku: finalSku,
                 category,
                 price: finalCalculatedPrice, // Overridden by Module 2 Pricing Pipeline
                 costPrice: parsedCostPrice, // Store cost_price as costPrice
-                stock: finalStock,
+                stock: parsedStock,
                 unit,
-                baseUnit,
-                purchaseUnit,
-                conversionFactor: parsedConversionFactor,
                 lowStockThreshold: parsedLowStockThreshold,
                 invoiceNumber: invoice_number,
                 barcode,
                 wholesalerId: wholesalerProfile.id,
                 image: imageUrl || null,
                 taxType: parsedTaxType,
-                supplierCost: parsedSupplierCost
+                supplierCost: parsedSupplierCost,
+                baseUnit: baseUnit || null,
+                purchaseUnit: purchaseUnit || null,
+                conversionFactor: parsedConversion
             }
         });
         console.log('✅ Product created successfully:', product.id);
@@ -527,12 +532,18 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     var _a;
     try {
         const { id } = req.params;
-        const { name, category, sku, unit, low_stock_threshold, invoice_number, barcode, description, image, baseUnit, purchaseUnit, conversionFactor } = req.body;
+        const { name, category, sku, unit, low_stock_threshold, invoice_number, barcode, description, image, baseUnit, purchaseUnit, conversionFactor, costPerPurchaseUnit, supplierCost, taxType, wholesale_price } = req.body;
         const wholesalerProfile = yield prisma_1.default.wholesalerProfile.findUnique({
             where: { userId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.id }
         });
         if (!wholesalerProfile) {
             return res.status(404).json({ error: 'Wholesaler profile not found' });
+        }
+        const currentProduct = yield prisma_1.default.product.findUnique({
+            where: { id: Number(id), wholesalerId: wholesalerProfile.id }
+        });
+        if (!currentProduct) {
+            return res.status(404).json({ error: 'Product not found or not owned by wholesaler' });
         }
         // Upload to Cloudinary if new image is provided
         let imageUrl = image;
@@ -555,6 +566,21 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 });
             }
         }
+        const parsedConversion = conversionFactor !== undefined ? (conversionFactor ? parseFloat(conversionFactor) : null) : currentProduct.conversionFactor;
+        const parsedCostPerPurchaseUnit = costPerPurchaseUnit !== undefined ? parseFloat(costPerPurchaseUnit) : undefined;
+        let parsedSupplierCost = supplierCost !== undefined ? parseFloat(supplierCost) : undefined;
+        if (parsedCostPerPurchaseUnit !== undefined && parsedConversion && parsedConversion > 0) {
+            parsedSupplierCost = parsedCostPerPurchaseUnit / parsedConversion;
+        }
+        let finalCalculatedPrice = wholesale_price ? parseFloat(wholesale_price) : undefined;
+        if (parsedSupplierCost !== undefined) {
+            const resolvedTaxType = taxType || currentProduct.taxType || 'B';
+            const config = yield prisma_1.default.systemConfig.findFirst();
+            const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
+            const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
+            const pricingResult = (0, pricingUtils_1.calculateWholesalePrice)(parsedSupplierCost, wholesalerMarkupPct, resolvedTaxType, exciseDutyRatePct);
+            finalCalculatedPrice = pricingResult.finalInvoicePrice;
+        }
         const product = yield prisma_1.default.product.update({
             where: {
                 id: Number(id),
@@ -565,14 +591,16 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 category,
                 sku,
                 unit,
-                baseUnit,
-                purchaseUnit,
-                conversionFactor: conversionFactor ? parseFloat(conversionFactor) : null,
                 lowStockThreshold: low_stock_threshold ? parseInt(low_stock_threshold) : undefined,
                 invoiceNumber: invoice_number,
                 barcode,
                 description,
-                image: imageUrl
+                image: imageUrl,
+                price: finalCalculatedPrice,
+                supplierCost: parsedSupplierCost,
+                baseUnit: baseUnit !== undefined ? (baseUnit || null) : undefined,
+                purchaseUnit: purchaseUnit !== undefined ? (purchaseUnit || null) : undefined,
+                conversionFactor: parsedConversion
             }
         });
         res.json({ success: true, product });
@@ -1077,6 +1105,7 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
             const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
             const retailerMarkupPct = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
             const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
+            const { calculateRetailPrice } = yield Promise.resolve().then(() => __importStar(require('../utils/pricingUtils')));
             // 2. Update Retailer's Inventory
             for (const item of updatedOrder.orderItems) {
                 if (!item.product)
@@ -1113,18 +1142,16 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
                 }
                 if (existingProduct) {
                     // Update existing stock and ensure it's active
-                    const factor = existingProduct.conversionFactor || item.product.conversionFactor;
-                    const incrementStock = (factor && factor > 0 && (existingProduct.purchaseUnit || item.product.purchaseUnit) && (existingProduct.baseUnit || item.product.baseUnit))
-                        ? item.quantity * factor
-                        : item.quantity;
+                    const conversionFactor = existingProduct.conversionFactor ? Number(existingProduct.conversionFactor) : null;
+                    let addStock = item.quantity;
+                    if (conversionFactor && conversionFactor > 0) {
+                        addStock = item.quantity * conversionFactor;
+                    }
                     yield tx.product.update({
                         where: { id: existingProduct.id },
                         data: {
-                            stock: { increment: incrementStock },
-                            status: 'active',
-                            baseUnit: existingProduct.baseUnit || item.product.baseUnit,
-                            purchaseUnit: existingProduct.purchaseUnit || item.product.purchaseUnit,
-                            conversionFactor: existingProduct.conversionFactor || item.product.conversionFactor,
+                            stock: { increment: addStock },
+                            status: 'active'
                         }
                     });
                 }
@@ -1134,11 +1161,12 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
                     const supplierCost = item.product.supplierCost || item.product.costPrice || 0;
                     const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
                     const taxType = item.product.taxType || 'B';
-                    const retailPricing = (0, pricingUtils_1.calculateRetailPrice)(cleanBaseCost, retailerMarkupPct, taxType, exciseDutyRatePct);
-                    const factor = item.product.conversionFactor;
-                    const inheritedStock = (factor && factor > 0 && item.product.purchaseUnit && item.product.baseUnit)
-                        ? item.quantity * factor
-                        : item.quantity;
+                    const retailPricing = calculateRetailPrice(cleanBaseCost, retailerMarkupPct, taxType, exciseDutyRatePct);
+                    const conversionFactor = item.product.conversionFactor ? Number(item.product.conversionFactor) : null;
+                    let addStock = item.quantity;
+                    if (conversionFactor && conversionFactor > 0) {
+                        addStock = item.quantity * conversionFactor;
+                    }
                     yield tx.product.create({
                         data: {
                             name: item.product.name,
@@ -1148,7 +1176,7 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
                             category: item.product.category,
                             price: retailPricing.finalConsumerShelfPrice, // Module 2 generated Final Consumer Shelf Price
                             costPrice: cleanBaseCost, // Retailer's cost basis (Taxes stripped out)
-                            stock: inheritedStock,
+                            stock: addStock,
                             retailerId: updatedOrder.retailerId,
                             unit: item.product.unit,
                             baseUnit: item.product.baseUnit,

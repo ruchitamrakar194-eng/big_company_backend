@@ -348,13 +348,15 @@ const sendToMeter = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (isNaN(parsedAmount) || parsedAmount <= 0) {
             return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
         }
-        // Apply strict round-down rule to 1 decimal place
-        const roundedAmount = Math.floor(parsedAmount * 10) / 10;
-        // Apply minimum transfer limit check of 0.1 m³
-        if (roundedAmount < 0.1) {
+        if (parsedAmount < 0.1) {
             return res.status(400).json({ success: false, error: 'Minimum transfer amount is 0.1 m³.' });
         }
-        // 1. Resolve Meter (Flexible search for with/without MTR- prefix)
+        const decimals = parsedAmount.toString().split('.')[1];
+        if (decimals && decimals.length > 1) {
+            return res.status(400).json({ success: false, error: `Only one decimal precision allowed. Value ${parsedAmount} is invalid.` });
+        }
+        const roundedAmount = parsedAmount;
+        // Process strictly as Meter Recharge
         const meter = yield prisma_1.default.gasMeter.findFirst({
             where: {
                 OR: [
@@ -379,7 +381,7 @@ const sendToMeter = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         return initiateGasMeterRecharge(rechargeReq, res);
     }
     catch (error) {
-        console.error('Error sending rewards to meter:', error);
+        console.error('Error sending rewards:', error);
         return res.status(500).json({ success: false, error: 'Failed to send rewards. Please try again.' });
     }
 });

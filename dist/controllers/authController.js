@@ -46,6 +46,49 @@ exports.forgotPassword = exports.updatePin = exports.updatePassword = exports.lo
 const prisma_1 = __importStar(require("../utils/prisma"));
 const auth_1 = require("../utils/auth");
 const email_queue_1 = require("../queues/email.queue");
+function parseUserAgent(userAgent) {
+    let browser = 'Unknown Browser';
+    let device = 'Unknown Device';
+    if (!userAgent)
+        return { browser, device };
+    const ua = userAgent.toLowerCase();
+    // Detect browser
+    if (ua.includes('firefox')) {
+        browser = 'Firefox';
+    }
+    else if (ua.includes('chrome') && !ua.includes('chromium')) {
+        browser = 'Chrome';
+    }
+    else if (ua.includes('safari') && !ua.includes('chrome')) {
+        browser = 'Safari';
+    }
+    else if (ua.includes('edge')) {
+        browser = 'Edge';
+    }
+    else if (ua.includes('opera')) {
+        browser = 'Opera';
+    }
+    // Detect device/OS
+    if (ua.includes('iphone')) {
+        device = 'iPhone';
+    }
+    else if (ua.includes('ipad')) {
+        device = 'iPad';
+    }
+    else if (ua.includes('android')) {
+        device = 'Android';
+    }
+    else if (ua.includes('windows')) {
+        device = 'Windows PC';
+    }
+    else if (ua.includes('macintosh')) {
+        device = 'Mac';
+    }
+    else if (ua.includes('linux')) {
+        device = 'Linux PC';
+    }
+    return { browser, device };
+}
 const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { email, password, phone, pin, role, first_name, last_name, business_name, shop_name, company_name } = req.body;
@@ -131,7 +174,7 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 }
             });
         }
-        const token = (0, auth_1.generateToken)({ id: user.id, role: user.role });
+        const token = (0, auth_1.generateToken)({ id: user.id, role: user.role, require_password_reset: false });
         // Trigger Customer Signup SMS (CUS-SMS-001)
         if (targetuser_role === 'consumer' && user.phone) {
             try {
@@ -268,37 +311,123 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             }
             return res.status(401).json({ error: 'Invalid credentials' });
         }
-        const token = (0, auth_1.generateToken)({ id: user.id, role: user.role });
+        const token = (0, auth_1.generateToken)({ id: user.id, role: user.role, require_password_reset: user.isFirstLogin });
         // Notify Retailer of Suspicious Activity (RET-EMAIL-015)
         if (user.role === 'retailer' && user.email) {
-            yield email_queue_1.emailQueue.add('suspicious-activity-alert', {
-                to: user.email,
-                templateType: 'suspicious-activity', // Mapped to RET-EMAIL-015
-                data: {
-                    retail_name: user.name || 'Retailer',
-                    activity: 'New Device Login',
-                    time: new Date().toLocaleString(),
-                    location: 'Kigali, Rwanda (Approx)',
-                    device: req.headers['user-agent'] || 'Unknown Device',
-                    security_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/retailer/security`
-                },
-                relatedEntity: { type: 'USER', id: user.id.toString() }
+            const userAgent = req.headers['user-agent'] || 'Unknown Device';
+            const ipAddress = req.ip || req.headers['x-forwarded-for'] || 'Unknown';
+            const { browser, device } = parseUserAgent(userAgent);
+            // Get previous logins
+            const previousLogins = yield prisma_1.default.wholesalerLogin.findMany({
+                where: { userId: user.id },
+                orderBy: { createdAt: 'desc' },
+                take: 50
             });
+            let isUnusual = false;
+            let unusualReason = 'Unusual account login detected';
+            if (previousLogins.length > 0) {
+                const knownDevices = new Set(previousLogins.map(l => l.device));
+                const knownBrowsers = new Set(previousLogins.map(l => l.browser));
+                const isNewDevice = !knownDevices.has(device);
+                const isNewBrowser = !knownBrowsers.has(browser);
+                const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+                const recentLoginsCount = previousLogins.filter(l => new Date(l.createdAt) > tenMinutesAgo).length;
+                const isHighFrequency = recentLoginsCount >= 5;
+                if (isNewDevice || isNewBrowser || isHighFrequency) {
+                    isUnusual = true;
+                    const reasons = [];
+                    if (isNewDevice)
+                        reasons.push('new device');
+                    if (isNewBrowser)
+                        reasons.push('new browser');
+                    if (isHighFrequency)
+                        reasons.push('suspicious login frequency');
+                    unusualReason = `Unusual login detected: ${reasons.join(', ')}`;
+                }
+            }
+            // Record this login
+            yield prisma_1.default.wholesalerLogin.create({
+                data: {
+                    userId: user.id,
+                    ipAddress,
+                    userAgent,
+                    device,
+                    browser
+                }
+            });
+            if (isUnusual) {
+                yield email_queue_1.emailQueue.add('suspicious-activity-alert', {
+                    to: user.email,
+                    templateType: 'suspicious-activity', // Mapped to RET-EMAIL-015
+                    data: {
+                        retail_name: user.name || 'Retailer',
+                        activity: unusualReason,
+                        time: new Date().toLocaleString(),
+                        location: 'Kigali, Rwanda (Approx)',
+                        device: req.headers['user-agent'] || 'Unknown Device',
+                        security_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/retailer/security`
+                    },
+                    relatedEntity: { type: 'USER', id: user.id.toString() }
+                });
+            }
         }
         // Notify Wholesaler of Suspicious Activity (WHO-EMAIL-015)
         if (user.role === 'wholesaler' && user.email) {
-            yield email_queue_1.emailQueue.add('suspicious-activity-alert', {
-                to: user.email,
-                templateType: 'wholesaler-suspicious-activity', // Mapped to WHO-EMAIL-015
-                data: {
-                    wholesaler_name: user.name || 'Wholesaler',
-                    activity: 'Unusual account login detected',
-                    time: new Date().toLocaleString(),
-                    location: req.ip || 'Unknown',
-                    security_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/wholesaler/security`
-                },
-                relatedEntity: { type: 'USER', id: user.id.toString() }
+            const userAgent = req.headers['user-agent'] || 'Unknown Device';
+            const ipAddress = req.ip || req.headers['x-forwarded-for'] || 'Unknown';
+            const { browser, device } = parseUserAgent(userAgent);
+            // Get previous logins
+            const previousLogins = yield prisma_1.default.wholesalerLogin.findMany({
+                where: { userId: user.id },
+                orderBy: { createdAt: 'desc' },
+                take: 50
             });
+            let isUnusual = false;
+            let unusualReason = 'Unusual account login detected';
+            if (previousLogins.length > 0) {
+                const knownDevices = new Set(previousLogins.map(l => l.device));
+                const knownBrowsers = new Set(previousLogins.map(l => l.browser));
+                const isNewDevice = !knownDevices.has(device);
+                const isNewBrowser = !knownBrowsers.has(browser);
+                const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+                const recentLoginsCount = previousLogins.filter(l => new Date(l.createdAt) > tenMinutesAgo).length;
+                const isHighFrequency = recentLoginsCount >= 5;
+                if (isNewDevice || isNewBrowser || isHighFrequency) {
+                    isUnusual = true;
+                    const reasons = [];
+                    if (isNewDevice)
+                        reasons.push('new device');
+                    if (isNewBrowser)
+                        reasons.push('new browser');
+                    if (isHighFrequency)
+                        reasons.push('suspicious login frequency');
+                    unusualReason = `Unusual login detected: ${reasons.join(', ')}`;
+                }
+            }
+            // Record this login
+            yield prisma_1.default.wholesalerLogin.create({
+                data: {
+                    userId: user.id,
+                    ipAddress,
+                    userAgent,
+                    device,
+                    browser
+                }
+            });
+            if (isUnusual) {
+                yield email_queue_1.emailQueue.add('suspicious-activity-alert', {
+                    to: user.email,
+                    templateType: 'wholesaler-suspicious-activity', // Mapped to WHO-EMAIL-015
+                    data: {
+                        wholesaler_name: user.name || 'Wholesaler',
+                        activity: unusualReason,
+                        time: new Date().toLocaleString(),
+                        location: ipAddress,
+                        security_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/wholesaler/security`
+                    },
+                    relatedEntity: { type: 'USER', id: user.id.toString() }
+                });
+            }
         }
         // Format Response
         const responseData = {
@@ -396,7 +525,8 @@ const updatePassword = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 relatedEntity: { type: 'USER', id: user.id.toString() }
             });
         }
-        res.json({ success: true, message: 'Password updated successfully' });
+        const newToken = (0, auth_1.generateToken)({ id: user.id, role: user.role, require_password_reset: false });
+        res.json({ success: true, message: 'Password updated successfully', access_token: newToken });
     }
     catch (error) {
         res.status(500).json({ error: error.message });
@@ -460,7 +590,8 @@ const updatePin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 relatedEntity: { type: 'USER', id: user.id.toString() }
             });
         }
-        res.json({ success: true, message: 'PIN updated successfully' });
+        const newToken = (0, auth_1.generateToken)({ id: user.id, role: user.role, require_password_reset: false });
+        res.json({ success: true, message: 'PIN updated successfully', access_token: newToken });
     }
     catch (error) {
         res.status(500).json({ error: error.message });
