@@ -4021,16 +4021,8 @@ export const processRefundRequest = async (req: AuthRequest, res: Response) => {
 // ==========================================
 export const getAdminProfitInvoices = async (req: AuthRequest, res: Response) => {
   try {
-    const invoices = await prisma.profitInvoice.findMany({
-      include: {
-        order: {
-          include: {
-            wholesalerProfile: { include: { user: true } },
-            retailerProfile: { include: { user: true } },
-          }
-        }
-      },
-      orderBy: { generatedAt: 'desc' }
+    const invoices = await prisma.customProfitInvoice.findMany({
+      orderBy: { createdAt: 'desc' }
     });
     res.json({ success: true, data: invoices });
   } catch (error: any) {
@@ -4040,44 +4032,49 @@ export const getAdminProfitInvoices = async (req: AuthRequest, res: Response) =>
 
 export const generateAdminProfitInvoice = async (req: AuthRequest, res: Response) => {
   try {
-    const { orderId } = req.body;
+    const {
+      recipientType,
+      recipientName,
+      totalRevenue,
+      grossProfit,
+      tax,
+      netProfit,
+      recipientSharePct,
+      recipientShareAmt,
+      companySharePct,
+      companyShareAmt,
+      rewardsPoolPct,
+      rewardsPoolAmt,
+      rentExpense,
+      salariesExpense,
+      otherExpense,
+      totalExpense,
+      finalPayable
+    } = req.body;
 
-    if (!orderId) {
-      return res.status(400).json({ success: false, error: 'Order ID is required' });
+    if (!recipientType || !recipientName) {
+      return res.status(400).json({ success: false, error: 'Recipient Type and Name are required' });
     }
 
-    const order = await prisma.order.findUnique({
-      where: { id: Number(orderId) },
-      include: { orderItems: { include: { product: true } }, profitInvoice: true }
-    });
-
-    if (!order) {
-      return res.status(404).json({ success: false, error: 'Order not found' });
-    }
-
-    if (order.profitInvoice) {
-      return res.status(400).json({ success: false, error: 'Profit invoice already exists for this order' });
-    }
-
-    // Calculate profit
-    let profitAmount = 0;
-    for (const item of order.orderItems) {
-      const costPrice = item.product?.costPrice || 0;
-      if (costPrice > 0 && item.price > costPrice) {
-        profitAmount += (item.price - costPrice) * item.quantity;
-      } else {
-        // Fallback if costPrice is missing: assume 10% profit margin
-        profitAmount += (item.price * item.quantity) * 0.10;
-      }
-    }
-
-    const invoiceNumber = `PI-${Date.now()}`;
-
-    const newInvoice = await prisma.profitInvoice.create({
+    const newInvoice = await prisma.customProfitInvoice.create({
       data: {
-        orderId: order.id,
-        profitAmount: profitAmount,
-        invoiceNumber: invoiceNumber
+        recipientType,
+        recipientName,
+        totalRevenue: Number(totalRevenue) || 0,
+        grossProfit: Number(grossProfit) || 0,
+        tax: Number(tax) || 0,
+        netProfit: Number(netProfit) || 0,
+        recipientSharePct: Number(recipientSharePct) || 0,
+        recipientShareAmt: Number(recipientShareAmt) || 0,
+        companySharePct: Number(companySharePct) || 0,
+        companyShareAmt: Number(companyShareAmt) || 0,
+        rewardsPoolPct: Number(rewardsPoolPct) || 0,
+        rewardsPoolAmt: Number(rewardsPoolAmt) || 0,
+        rentExpense: Number(rentExpense) || 0,
+        salariesExpense: Number(salariesExpense) || 0,
+        otherExpense: Number(otherExpense) || 0,
+        totalExpense: Number(totalExpense) || 0,
+        finalPayable: Number(finalPayable) || 0
       }
     });
 

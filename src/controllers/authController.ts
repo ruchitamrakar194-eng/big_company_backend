@@ -154,6 +154,25 @@ export const register = async (req: Request, res: Response) => {
       }
     }
 
+    // Trigger Customer Signup Email (account creation / sign up)
+    if (targetuser_role === 'consumer' && user.email) {
+      try {
+        const { emailQueue } = await import('../queues/email.queue');
+        await emailQueue.add('customer-signup-email', {
+          to: user.email,
+          templateType: 'sign up', // Maps to user's 'sign up' or 'account creation' email template
+          data: {
+            name: user.name || 'Valued Customer',
+            email: user.email,
+            customer_id: user.id.toString()
+          },
+          relatedEntity: { type: 'USER', id: user.id.toString() }
+        });
+      } catch (err) {
+        console.error('Customer signup email failed:', err);
+      }
+    }
+
     res.json({
       success: true,
       access_token: token,
@@ -226,6 +245,20 @@ export const login = async (req: Request, res: Response) => {
     }
 
     if (!valid) {
+      if (user.role === 'consumer' && user.email) {
+        await emailQueue.add('failed-login-alert', {
+          to: user.email,
+          templateType: 'login attempt',
+          data: {
+            name: user.name || 'Customer',
+            attempt_time: new Date().toLocaleString(),
+            device: req.headers['user-agent'] || 'Unknown Device',
+            ip: req.ip || 'Unknown'
+          },
+          relatedEntity: { type: 'USER', id: user.id.toString() }
+        });
+      }
+
       // Notify Retailer of Failed Login (RET-EMAIL-017)
       if (user.role === 'retailer' && user.email) {
         await emailQueue.add('failed-login-alert', {

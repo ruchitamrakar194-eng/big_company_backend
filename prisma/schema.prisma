@@ -1123,3 +1123,28 @@ model SystemAlert {
 
   @@map("systemalert")
 }
+
+model CustomProfitInvoice {
+  id                Int      @id @default(autoincrement())
+  recipientType     String   // 'Retailer' or 'Wholesaler'
+  recipientName     String
+  totalRevenue      Float
+  grossProfit       Float
+  tax               Float
+  netProfit         Float
+  recipientSharePct Float
+  recipientShareAmt Float
+  companySharePct   Float
+  companyShareAmt   Float
+  rewardsPoolPct    Float
+  rewardsPoolAmt    Float
+  rentExpense       Float
+  salariesExpense   Float
+  otherExpense      Float
+  totalExpense      Float
+  finalPayable      Float
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("custom_profit_invoices")
+}

@@ -2247,11 +2247,14 @@ export const makeRepayment = async (req: AuthRequest, res: Response) => {
       // Update Credit Usage (if this was a credit order)
       const creditInfo = await prisma.retailerCredit.findUnique({ where: { retailerId: retailerProfile.id } });
       if (creditInfo) {
+        const newUsedCredit = Math.max(0, creditInfo.usedCredit - amount);
+        const newAvailableCredit = Math.min(creditInfo.creditLimit, creditInfo.availableCredit + amount);
+
         await prisma.retailerCredit.update({
           where: { retailerId: retailerProfile.id },
           data: {
-            usedCredit: { decrement: amount },
-            availableCredit: { increment: amount }
+            usedCredit: newUsedCredit,
+            availableCredit: newAvailableCredit
           }
         });
       }
@@ -2325,11 +2328,14 @@ export const payCredit = async (req: AuthRequest, res: Response) => {
       // Update Credit Usage
       const creditInfo = await tx.retailerCredit.findUnique({ where: { retailerId: retailerProfile.id } });
       if (creditInfo) {
+        const newUsedCredit = Math.max(0, creditInfo.usedCredit - amount);
+        const newAvailableCredit = Math.min(creditInfo.creditLimit, creditInfo.availableCredit + amount);
+
         await tx.retailerCredit.update({
           where: { retailerId: retailerProfile.id },
           data: {
-            usedCredit: { decrement: amount },
-            availableCredit: { increment: amount }
+            usedCredit: newUsedCredit,
+            availableCredit: newAvailableCredit
           }
         });
       }

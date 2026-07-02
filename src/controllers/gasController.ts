@@ -458,6 +458,24 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
                 },
                 relatedEntity: { type: 'GAS_ORDER', id: order.id.toString() }
             });
+            
+            // Trigger Email (if email exists)
+            if (consumerProfile.user.email) {
+                await emailQueue.add('gas-recharge-success-email', {
+                    to: consumerProfile.user.email,
+                    templateType: 'gas top-up', // Mapped to user's 'gas top-up' template
+                    data: {
+                        name: consumerProfile.fullName || consumerProfile.user.name || 'Valued Customer',
+                        email: consumerProfile.user.email,
+                        meter_name: meter.aliasName || 'Meter',
+                        meter_id: meter_number,
+                        amount: amount.toLocaleString(),
+                        token: token,
+                        transaction_id: order.id.toString()
+                    },
+                    relatedEntity: { type: 'GAS_ORDER', id: order.id.toString() }
+                });
+            }
         } catch (err) {
             console.error('Gas recharge notifications failed:', err);
         }
