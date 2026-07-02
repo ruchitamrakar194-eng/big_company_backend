@@ -8,6 +8,7 @@ console.log(`[Queue] Connecting to Redis at: ${redisUrl.includes('@') ? redisUrl
 
 const connection = new IORedis(redisUrl, {
   maxRetriesPerRequest: null,
+  family: 4, // Force IPv4 to fix Railway ETIMEDOUT issues
   // Automatically enable TLS if rediss:// protocol is used
   tls: redisUrl.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
 });
