@@ -23,10 +23,10 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     todayStart.setHours(0, 0, 0, 0);
 
     // 1. Customers
-    const customerTotal = await prisma.consumerProfile.count({ where: { user: { role: 'consumer' } } });
-    const customerLast24h = await prisma.consumerProfile.count({ where: { user: { role: 'consumer', createdAt: { gte: last24h } } } });
-    const customerLast7d = await prisma.consumerProfile.count({ where: { user: { role: 'consumer', createdAt: { gte: last7d } } } });
-    const customerLast30d = await prisma.consumerProfile.count({ where: { user: { role: 'consumer', createdAt: { gte: last30d } } } });
+    const customerTotal = await prisma.consumerProfile.count();
+    const customerLast24h = await prisma.consumerProfile.count({ where: { user: { createdAt: { gte: last24h } } } });
+    const customerLast7d = await prisma.consumerProfile.count({ where: { user: { createdAt: { gte: last7d } } } });
+    const customerLast30d = await prisma.consumerProfile.count({ where: { user: { createdAt: { gte: last30d } } } });
 
     // 2. Orders & Revenue (Combine B2C Sales and B2B Wholesaler Orders)
     const [sales, wholesaleOrders] = await Promise.all([
@@ -406,11 +406,6 @@ export const getReports = async (req: AuthRequest, res: Response) => {
 export const getCustomers = async (req: AuthRequest, res: Response) => {
   try {
     const customers = await prisma.consumerProfile.findMany({
-      where: {
-        user: {
-          role: 'consumer'
-        }
-      },
       include: {
         user: true,
         wallets: true,
@@ -845,9 +840,9 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
     });
 
     const retailerLoans = creditRequestsRaw.map((cr) => {
-      const rate = Number(rates.retailerInterestRate) || 5;
-      const interestAmount = Math.round(cr.amount * (rate / 100));
-      const totalRepayable = cr.amount + interestAmount;
+      const rate = 0; // Forced to 0% as per client requirements for retailers
+      const interestAmount = 0;
+      const totalRepayable = cr.amount;
 
       let st = cr.status;
       if (st === 'pending') st = 'pending';
@@ -3920,6 +3915,173 @@ export const getCustomerCreditLimit = async (req: AuthRequest, res: Response) =>
     }
 
     res.json({ success: true, creditLimit: (profile as any).creditLimit || 50000, profile });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Refund Requests
+export const getRefundRequests = async (req: AuthRequest, res: Response) => {
+  try {
+    const refundRequests = await prisma.walletTransaction.findMany({
+      where: {
+        type: 'refund'
+      },
+      include: {
+        wallet: {
+          include: {
+            consumerProfile: {
+              include: { user: true }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ success: true, data: refundRequests });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const processRefundRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { action, reason } = req.body; // action: 'approve' or 'reject'
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ success: false, error: 'Invalid action' });
+    }
+
+    const transaction = await prisma.walletTransaction.findUnique({
+      where: { id: Number(id) },
+      include: { wallet: { include: { consumerProfile: true } } }
+    });
+
+    if (!transaction) {
+      return res.status(404).json({ success: false, error: 'Refund request not found' });
+    }
+
+    if (transaction.status !== 'pending') {
+      return res.status(400).json({ success: false, error: 'Request is already processed' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const newStatus = action === 'approve' ? 'approved' : 'rejected';
+      
+      // Update transaction status
+      await tx.walletTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: newStatus,
+          description: reason ? `${transaction.description} - ${reason}` : transaction.description
+        }
+      });
+
+      // If approved, deduct from wallet
+      if (action === 'approve' && transaction.walletId) {
+        const currentWallet = await tx.wallet.findUnique({
+          where: { id: transaction.walletId }
+        });
+        
+        if (currentWallet && currentWallet.balance < transaction.amount) {
+          throw new Error('Customer wallet has insufficient balance for this refund');
+        }
+
+        await tx.wallet.update({
+          where: { id: transaction.walletId },
+          data: {
+            balance: { decrement: transaction.amount }
+          }
+        });
+
+        if (transaction.wallet && transaction.wallet.consumerId) {
+          const profileWalletCount = await tx.wallet.findFirst({
+            where: { id: transaction.walletId, type: 'dashboard_wallet' }
+          });
+          if (profileWalletCount) {
+             await tx.consumerProfile.update({
+               where: { id: transaction.wallet.consumerId },
+               data: { walletBalance: { decrement: transaction.amount } }
+             });
+          }
+        }
+      }
+    });
+
+    res.json({ success: true, message: `Refund request ${action}d successfully` });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ==========================================
+// PROFIT INVOICES (Admin)
+// ==========================================
+export const getAdminProfitInvoices = async (req: AuthRequest, res: Response) => {
+  try {
+    const invoices = await prisma.profitInvoice.findMany({
+      include: {
+        order: {
+          include: {
+            wholesalerProfile: { include: { user: true } },
+            retailerProfile: { include: { user: true } },
+          }
+        }
+      },
+      orderBy: { generatedAt: 'desc' }
+    });
+    res.json({ success: true, data: invoices });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const generateAdminProfitInvoice = async (req: AuthRequest, res: Response) => {
+  try {
+    const { orderId } = req.body;
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, error: 'Order ID is required' });
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id: Number(orderId) },
+      include: { orderItems: { include: { product: true } }, profitInvoice: true }
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, error: 'Order not found' });
+    }
+
+    if (order.profitInvoice) {
+      return res.status(400).json({ success: false, error: 'Profit invoice already exists for this order' });
+    }
+
+    // Calculate profit
+    let profitAmount = 0;
+    for (const item of order.orderItems) {
+      const costPrice = item.product?.costPrice || 0;
+      if (costPrice > 0 && item.price > costPrice) {
+        profitAmount += (item.price - costPrice) * item.quantity;
+      } else {
+        // Fallback if costPrice is missing: assume 10% profit margin
+        profitAmount += (item.price * item.quantity) * 0.10;
+      }
+    }
+
+    const invoiceNumber = `PI-${Date.now()}`;
+
+    const newInvoice = await prisma.profitInvoice.create({
+      data: {
+        orderId: order.id,
+        profitAmount: profitAmount,
+        invoiceNumber: invoiceNumber
+      }
+    });
+
+    res.json({ success: true, message: 'Profit invoice generated successfully', data: newInvoice });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

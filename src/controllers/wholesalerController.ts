@@ -485,9 +485,6 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
 
     // Parse stock
     let parsedStock = stock ? parseFloat(stock) : 0;
-    if (parsedConversion && parsedConversion > 0 && req.body.stockInPurchaseUnits) {
-      parsedStock = parsedStock * parsedConversion;
-    }
     if (stock && (isNaN(parsedStock) || parsedStock < 0)) {
       console.error('❌ Invalid stock:', stock);
       return res.status(400).json({

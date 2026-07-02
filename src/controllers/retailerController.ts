@@ -287,7 +287,15 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
       orderBy: { name: 'asc' }
     });
 
-    res.json({ products: myProducts });
+    const config = await prisma.systemConfig.findFirst();
+    const retailerMarkupPct = (config as any)?.retailerMarkup || 20;
+
+    const productsWithMargin = myProducts.map(p => ({
+      ...p,
+      profitMargin: retailerMarkupPct
+    }));
+
+    res.json({ products: productsWithMargin });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

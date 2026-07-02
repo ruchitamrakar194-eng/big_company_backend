@@ -72,7 +72,11 @@ import {
   getEmailEvents,
   updateEmailEvent,
   getSystemAlerts,
-  acknowledgeAlert
+  acknowledgeAlert,
+  getRefundRequests,
+  processRefundRequest,
+  getAdminProfitInvoices,
+  generateAdminProfitInvoice
 } from '../controllers/adminController';
 import { getSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../controllers/supplierController';
 import { getJobs, createJob, updateJob, deleteJob, getApplications, createApplication, updateApplicationStatus } from '../controllers/recruitmentController';
@@ -169,6 +173,10 @@ router.get('/reports', getReports);
 router.get('/reports/transactions', getTransactionReport);
 router.get('/reports/revenue', getRevenueReport);
 
+// Refund Requests
+router.get('/refund-requests', getRefundRequests);
+router.post('/refund-requests/:id/process', processRefundRequest);
+
 // System Config Routes
 router.get('/system-config', getSystemConfig);
 router.put('/system-config', updateSystemConfig);
@@ -206,6 +214,12 @@ router.post('/settlement-invoices', createSettlementInvoice);
 router.get('/settlement-invoices/:id', getSettlementInvoice);
 router.put('/settlement-invoices/:id', updateSettlementInvoice);
 router.delete('/settlement-invoices/:id', deleteSettlementInvoice);
+
+// ==========================================
+// PROFIT INVOICE ROUTES
+// ==========================================
+router.get('/profit-invoices', getAdminProfitInvoices);
+router.post('/profit-invoices/generate', generateAdminProfitInvoice);
 
 // ==========================================
 // WHOLESALE ORDER MANAGEMENT
