@@ -51,7 +51,9 @@ import {
   confirmPurchaseOrderDelivery,
   getGasRewardsGiven,
   getPaymentAuditLogs,
-  getMyProfitInvoices
+  getMyProfitInvoices,
+  getRetailerLoans,
+  payRetailerLoan
 } from '../controllers/retailerController';
 import { authenticate } from '../middleware/authMiddleware';
 
@@ -125,5 +127,9 @@ router.get('/manual-payment/audit', getPaymentAuditLogs);
 
 // Profit Invoices (Read-only - Admin generates these)
 router.get('/profit-invoices', getMyProfitInvoices);
+
+// Retailer Loans & Repayments
+router.get('/loans', getRetailerLoans);
+router.post('/loans/repay', payRetailerLoan);
 
 export default router;

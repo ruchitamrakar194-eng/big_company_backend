@@ -742,7 +742,25 @@ model RetailerProfile {
   linkRequests              LinkRequest[]            @relation("RetailerLinkRequests")
   linkedCustomers           ConsumerProfile[]        @relation("RetailerCustomers")
   customerLinkRequests      CustomerLinkRequest[]    @relation("RetailerCustomerLinkRequests")
+  retailerLoans             RetailerLoan[]
 }
+
+model RetailerLoan {
+  id              Int             @id @default(autoincrement())
+  retailerId      Int
+  amount          Float
+  interestRate    Float           @default(18)
+  totalRepayable  Float
+  remainingAmount Float
+  status          String          @default("active") // active, paid
+  dueDate         DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @default(now()) @updatedAt
+  retailerProfile RetailerProfile @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+
+  @@map("retailerloan")
+}
+
 
 // Link Request - Retailer requests to be linked with a Wholesaler
 model LinkRequest {

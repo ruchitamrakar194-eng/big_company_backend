@@ -3941,3 +3941,169 @@ export const getMyProfitInvoices = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// ==========================================
+// RETAILER LOANS & REPAYMENTS
+// ==========================================
+
+// Get all active/paid loans for retailer
+export const getRetailerLoans = async (req: AuthRequest, res: Response) => {
+  try {
+    const retailerProfile = await prisma.retailerProfile.findUnique({
+      where: { userId: req.user!.id }
+    });
+
+    if (!retailerProfile) {
+      return res.status(404).json({ error: 'Retailer profile not found' });
+    }
+
+    const loans = await (prisma as any).retailerLoan.findMany({
+      where: { retailerId: retailerProfile.id },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ success: true, data: loans });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Repay a specific loan
+export const payRetailerLoan = async (req: AuthRequest, res: Response) => {
+  try {
+    const retailerProfile = await prisma.retailerProfile.findUnique({
+      where: { userId: req.user!.id },
+      include: { user: true }
+    });
+
+    if (!retailerProfile) {
+      return res.status(404).json({ error: 'Retailer profile not found' });
+    }
+
+    const { loanId, amount, paymentMethod = 'wallet', phone } = req.body;
+
+    if (!loanId || !amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid loan repayment parameters' });
+    }
+
+    const loan = await (prisma as any).retailerLoan.findUnique({
+      where: { id: Number(loanId) }
+    });
+
+    if (!loan || loan.retailerId !== retailerProfile.id) {
+      return res.status(404).json({ error: 'Loan not found or unauthorized' });
+    }
+
+    if (loan.status === 'paid') {
+      return res.status(400).json({ error: 'Loan is already fully paid' });
+    }
+
+    const repaymentAmount = Math.min(amount, loan.remainingAmount);
+
+    // 1. PalmKash Integration for MoMo
+    let externalRef = null;
+    if (paymentMethod === 'mobile_money' || paymentMethod === 'momo' || paymentMethod === 'airtel') {
+      const palmKash = (await import('../services/palmKash.service')).default;
+      const pmResult = await palmKash.initiatePayment({
+        amount: parseFloat(repaymentAmount.toString()),
+        phoneNumber: phone || (retailerProfile as any).user?.phone || '',
+        referenceId: `RLREPAY-${Date.now()}`,
+        description: `Retailer Loan Repayment (Loan #${loanId})`
+      });
+
+      if (!pmResult.success) {
+        return res.status(400).json({ success: false, error: pmResult.error });
+      }
+      externalRef = pmResult.transactionId;
+    }
+
+    // 2. Wallet Balance Check
+    if (paymentMethod === 'wallet') {
+      if (retailerProfile.walletBalance < repaymentAmount) {
+        return res.status(400).json({ error: 'Insufficient wallet balance' });
+      }
+    }
+
+    // 3. Process Transaction
+    await prisma.$transaction(async (tx) => {
+      // Debit wallet balance if chosen
+      if (paymentMethod === 'wallet') {
+        await tx.retailerProfile.update({
+          where: { id: retailerProfile.id },
+          data: { walletBalance: { decrement: repaymentAmount } }
+        });
+      }
+
+      // Update remaining amount and status of the RetailerLoan
+      const newRemaining = Math.max(0, loan.remainingAmount - repaymentAmount);
+      const newStatus = newRemaining === 0 ? 'paid' : 'active';
+
+      await (tx as any).retailerLoan.update({
+        where: { id: loan.id },
+        data: {
+          remainingAmount: newRemaining,
+          status: newStatus
+        }
+      });
+
+      // Create a WalletTransaction record for audit
+      const txRecord = await tx.walletTransaction.create({
+        data: {
+          retailerId: retailerProfile.id,
+          type: 'credit_repayment',
+          amount: repaymentAmount,
+          description: `Loan #${loanId} Repayment via ${paymentMethod}`,
+          reference: externalRef || `LNREPAY-${Date.now()}`,
+          status: 'completed'
+        }
+      });
+
+      // Notify Retailer (RET-EMAIL-010)
+      if (retailerProfile.user?.email) {
+        await emailQueue.add('credit-payment-confirmation', {
+          to: retailerProfile.user.email,
+          templateType: 'credit-payment-confirmation',
+          data: {
+            retail_name: retailerProfile.shopName,
+            paid_amount: repaymentAmount.toLocaleString(),
+            remaining_balance: newRemaining.toLocaleString(),
+            payment_date: new Date().toLocaleDateString(),
+            transaction_id: txRecord.reference
+          },
+          relatedEntity: { type: 'TRANSACTION', id: txRecord.id.toString() }
+        });
+      }
+
+      // Notify Wholesaler (WHO-EMAIL-008)
+      if (retailerProfile.linkedWholesalerId) {
+        const wholesaler = await tx.wholesalerProfile.findUnique({
+          where: { id: retailerProfile.linkedWholesalerId },
+          include: { user: true }
+        });
+
+        if (wholesaler?.user?.email) {
+          await emailQueue.add('wholesaler-payment-alert', {
+            to: wholesaler.user.email,
+            templateType: 'wholesaler-credit-payment-received',
+            data: {
+              wholesaler_name: wholesaler.companyName,
+              retail_name: retailerProfile.shopName,
+              paid_amount: repaymentAmount.toLocaleString(),
+              remaining_balance: newRemaining.toLocaleString(),
+              payment_date: new Date().toLocaleDateString(),
+              transaction_id: txRecord.reference,
+              dashboard_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/wholesaler/credit`
+            },
+            relatedEntity: { type: 'TRANSACTION', id: txRecord.id.toString() }
+          });
+        }
+      }
+    });
+
+    res.json({ success: true, message: 'Repayment successful' });
+  } catch (error: any) {
+    console.error('Retailer loan repayment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+

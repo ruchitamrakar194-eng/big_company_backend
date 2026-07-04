@@ -501,16 +501,40 @@ export const approveCreditRequest = async (req: AuthRequest, res: Response) => {
                 }
             });
 
-            // Use upsert to handle both existing and non-existing credit records reliably
+            // Get system configuration for interest rate
+            const systemConfig = await tx.systemConfig.findFirst();
+            const interestRate = systemConfig?.retailerLoanInterest ?? 18;
+            const interestAmount = creditRequest.amount * (interestRate / 100);
+            const totalRepayable = creditRequest.amount + interestAmount;
+
+            // Create new Retailer Loan record
+            await (tx as any).retailerLoan.create({
+                data: {
+                    retailerId: creditRequest.retailerId,
+                    amount: creditRequest.amount,
+                    interestRate,
+                    totalRepayable,
+                    remainingAmount: totalRepayable,
+                    status: 'active'
+                }
+            });
+
+            // Add the approved loan principal amount directly to the retailer's cash wallet balance
+            await tx.retailerProfile.update({
+                where: { id: creditRequest.retailerId },
+                data: {
+                    walletBalance: { increment: creditRequest.amount }
+                }
+            });
+
+            // Ensure retailerCredit record exists to prevent query joins from failing
             await tx.retailerCredit.upsert({
                 where: { retailerId: creditRequest.retailerId },
-                update: {
-                    availableCredit: { increment: creditRequest.amount }
-                },
+                update: {},
                 create: {
                     retailerId: creditRequest.retailerId,
-                    creditLimit: creditRequest.amount,
-                    availableCredit: creditRequest.amount,
+                    creditLimit: 0,
+                    availableCredit: 0,
                     usedCredit: 0
                 }
             });
@@ -523,8 +547,8 @@ export const approveCreditRequest = async (req: AuthRequest, res: Response) => {
                         amount: creditRequest.amount,
                         type: 'credit_extension',
                         status: 'completed',
-                        description: `Credit limit increased from request #${creditRequest.id}`,
-                        reference: `CR-${creditRequest.id}`
+                        description: `Approved loan of ${creditRequest.amount.toLocaleString()} RWF with ${interestRate}% interest (Total Repayable: ${totalRepayable.toLocaleString()} RWF)`,
+                        reference: `LN-${creditRequest.id}`
                     }
                 });
             } catch (txError: any) {
