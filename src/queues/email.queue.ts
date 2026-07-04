@@ -99,9 +99,19 @@ export const emailWorker = new Worker(
           }
         }
 
-        console.log(`[EmailWorker] Sending SMS to ${to}: ${plainText.substring(0, 80)}...`);
+        // Resolve phone number if `to` is an email address
+        let finalToSMS = to;
+        if (finalToSMS && finalToSMS.includes('@') && relatedEntity?.type === 'USER' && relatedEntity?.id) {
+          const user = await prisma.user.findUnique({ where: { id: Number(relatedEntity.id) }});
+          if (user?.phone) {
+            finalToSMS = user.phone;
+            console.log(`[EmailWorker] Resolved email to phone: ${finalToSMS}`);
+          }
+        }
+
+        console.log(`[EmailWorker] Sending SMS to ${finalToSMS}: ${plainText.substring(0, 80)}...`);
         const result = await SMSService.sendSMS(
-          to,
+          finalToSMS,
           plainText,
           templateType,
           relatedEntity,
@@ -113,9 +123,19 @@ export const emailWorker = new Worker(
           await job.updateData({ ...job.data, logId: result.logId });
         }
       } else {
+        // Resolve email address if `to` is a phone number
+        let finalTo = to;
+        if (finalTo && !finalTo.includes('@') && relatedEntity?.type === 'USER' && relatedEntity?.id) {
+          const user = await prisma.user.findUnique({ where: { id: Number(relatedEntity.id) }});
+          if (user?.email) {
+            finalTo = user.email;
+            console.log(`[EmailWorker] Resolved phone to email: ${finalTo}`);
+          }
+        }
+
         // Send the email and pass the logId to track retries on the same record
         const result = await EmailService.sendEmail(
-          to,
+          finalTo,
           finalSubject,
           finalHtml,
           templateType || 'MANUAL_EMAIL',
