@@ -1420,22 +1420,23 @@ export const updateCustomer = async (req: AuthRequest, res: Response) => {
 
     // Check if email/phone is taken by ANOTHER user
     if (email || phone) {
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          AND: [
-            { id: { not: profile.userId } }, // Exclude current user
-            {
-              OR: [
-                email ? { email } : {},
-                phone ? { phone } : {}
-              ]
-            }
-          ]
-        }
-      });
+      const orConditions = [];
+      if (email) orConditions.push({ email });
+      if (phone) orConditions.push({ phone });
 
-      if (existingUser) {
-        return res.status(400).json({ error: 'Email or phone already in use by another user' });
+      if (orConditions.length > 0) {
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            AND: [
+              { id: { not: profile.userId } }, // Exclude current user
+              { OR: orConditions }
+            ]
+          }
+        });
+
+        if (existingUser) {
+          return res.status(400).json({ error: 'Email or phone already in use by another user' });
+        }
       }
     }
 
