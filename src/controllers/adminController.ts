@@ -755,14 +755,13 @@ export const createWholesaler = async (req: AuthRequest, res: Response) => {
 // Get loans
 export const getLoans = async (req: AuthRequest, res: Response) => {
   try {
-    // Read live interest rates safely
-    let rates = { customerInterestRate: 10, retailerInterestRate: 5, wholesalerInterestRate: 8 };
-    try {
-      const p = path.join(__dirname, '..', 'customRates.json');
-      if (fs.existsSync(p)) {
-        rates = { ...rates, ...JSON.parse(fs.readFileSync(p, 'utf8')) };
-      }
-    } catch (e) { }
+    // Fetch live interest rates from SystemConfig
+    const config = await prisma.systemConfig.findFirst();
+    const rates = {
+      customerInterestRate: config?.customerLoanInterest ?? 10,
+      retailerInterestRate: config?.retailerLoanInterest ?? 0,
+      wholesalerInterestRate: config?.wholesalerLoanInterest ?? 8
+    };
 
     // 1. Fetch Consumer Loans
     const consumerLoansRaw = await prisma.loan.findMany({
@@ -840,9 +839,9 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
     });
 
     const retailerLoans = creditRequestsRaw.map((cr) => {
-      const rate = 0; // Forced to 0% as per client requirements for retailers
-      const interestAmount = 0;
-      const totalRepayable = cr.amount;
+      const rate = Number(rates.retailerInterestRate) || 0;
+      const interestAmount = Math.round(cr.amount * (rate / 100));
+      const totalRepayable = cr.amount + interestAmount;
 
       let st = cr.status;
       if (st === 'pending') st = 'pending';
