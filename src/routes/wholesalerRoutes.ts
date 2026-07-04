@@ -27,7 +27,8 @@ import {
   unlinkRetailer,
   // Settlement Invoices (Read-only)
   getSettlementInvoices,
-  getSettlementInvoice
+  getSettlementInvoice,
+  getMyProfitInvoices
 } from '../controllers/wholesalerController';
 import {
   getRetailers,
@@ -136,5 +137,8 @@ router.delete('/linked-retailers/:retailerId', unlinkRetailer);
 // Settlement Invoices (Read-only - Admin assigns these)
 router.get('/settlement-invoices', getSettlementInvoices);
 router.get('/settlement-invoices/:id', getSettlementInvoice);
+
+// Custom Profit Invoices (Read-only - Admin generates these)
+router.get('/profit-invoices', getMyProfitInvoices);
 
 export default router;

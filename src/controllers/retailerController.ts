@@ -3917,3 +3917,27 @@ export const getCategories = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// ==========================================
+// PROFIT INVOICES (Retailer - Read Only)
+// ==========================================
+export const getMyProfitInvoices = async (req: AuthRequest, res: Response) => {
+  try {
+    const retailerProfile = await prisma.retailerProfile.findUnique({
+      where: { userId: req.user!.id }
+    });
+
+    if (!retailerProfile) {
+      return res.status(404).json({ error: 'Retailer profile not found' });
+    }
+
+    const invoices = await prisma.customProfitInvoice.findMany({
+      where: { retailerId: retailerProfile.id } as any,
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ success: true, data: invoices });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};

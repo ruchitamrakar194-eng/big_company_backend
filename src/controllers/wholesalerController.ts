@@ -1974,3 +1974,28 @@ export const generateUniqueBarcode = async (req: AuthRequest, res: Response) => 
   }
 };
 
+// ==========================================
+// PROFIT INVOICES (Wholesaler - Read Only)
+// ==========================================
+export const getMyProfitInvoices = async (req: AuthRequest, res: Response) => {
+  try {
+    const wholesalerProfile = await prisma.wholesalerProfile.findUnique({
+      where: { userId: req.user!.id }
+    });
+
+    if (!wholesalerProfile) {
+      return res.status(404).json({ error: 'Wholesaler profile not found' });
+    }
+
+    const invoices = await prisma.customProfitInvoice.findMany({
+      where: { wholesalerId: wholesalerProfile.id } as any,
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ success: true, data: invoices });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+
