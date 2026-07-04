@@ -2693,9 +2693,6 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
           orderBy: { createdAt: 'desc' },
           take: 50,
           include: {
-            retailerProfile: {
-              select: { shopName: true, id: true }
-            },
             saleItems: {
               include: {
                 product: true
@@ -2723,13 +2720,25 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
       gasBalance: customer.gasMeters.reduce((sum, m) => sum + (m.currentUnits || 0), 0)
     };
 
+    // Fix: Manually fetch retailer profiles to avoid Prisma crashing on missing required relation
+    const retailerIds = [...new Set(customer.sales.map(s => s.retailerId))];
+    const retailers = await prisma.retailerProfile.findMany({
+      where: { id: { in: retailerIds } },
+      select: { id: true, shopName: true }
+    });
+    const retailerMap = new Map(retailers.map(r => [r.id, r]));
+    const ordersWithRetailers = customer.sales.map(s => ({
+      ...s,
+      retailerProfile: retailerMap.get(s.retailerId) || { id: s.retailerId, shopName: 'Unknown Retailer' }
+    }));
+
     // Order statistics
     const orderStats = {
-      pending: customer.sales.filter(s => s.status === 'pending').length,
-      active: customer.sales.filter(s => s.status === 'processing' || s.status === 'active').length,
-      completed: customer.sales.filter(s => s.status === 'completed' || s.status === 'delivered').length,
-      cancelled: customer.sales.filter(s => s.status === 'cancelled').length,
-      total: customer.sales.length
+      pending: ordersWithRetailers.filter(s => s.status === 'pending').length,
+      active: ordersWithRetailers.filter(s => s.status === 'processing' || s.status === 'active').length,
+      completed: ordersWithRetailers.filter(s => s.status === 'completed' || s.status === 'delivered').length,
+      cancelled: ordersWithRetailers.filter(s => s.status === 'cancelled').length,
+      total: ordersWithRetailers.length
     };
 
     // Get all transactions from all wallets
@@ -2749,10 +2758,10 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
     };
 
     // Last order details
-    const lastOrder = customer.sales.length > 0 ? customer.sales[0] : null;
+    const lastOrder = ordersWithRetailers.length > 0 ? ordersWithRetailers[0] : null;
 
     // Supplier chain - find linked retailers from sales
-    const linkedRetailers = Array.from(new Set(customer.sales.map(s => s.retailerProfile?.id).filter(Boolean)));
+    const linkedRetailers = Array.from(new Set(ordersWithRetailers.map(s => s.retailerProfile?.id).filter(Boolean)));
     const supplierChain = await prisma.retailerProfile.findMany({
       where: { id: { in: linkedRetailers as number[] } },
       include: {
@@ -2784,7 +2793,7 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
           currency: w.currency
         })),
         orderStats,
-        orders: customer.sales,
+        orders: ordersWithRetailers,
         transactionHistory: allTransactions,
         nfcCards: customer.nfcCards.map(card => ({
           id: card.id,
