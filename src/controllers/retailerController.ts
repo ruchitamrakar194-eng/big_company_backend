@@ -31,6 +31,9 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     startOfWeek.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1)); // Monday
     startOfWeek.setHours(0, 0, 0, 0);
 
+    const settlementDate = (retailerProfile as any).lastSettlementDate as Date | null;
+    const dateFilter: { gte: Date } | undefined = settlementDate ? { gte: settlementDate } : undefined;
+
     // Fetch data in parallel
     const [
       todaySales,
@@ -50,7 +53,10 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       }),
       // All Sales (for revenue stats)
       prisma.sale.findMany({
-        where: { retailerId: retailerProfile.id }
+        where: { 
+          retailerId: retailerProfile.id,
+          ...(dateFilter ? { createdAt: dateFilter } : {})
+        }
       }),
       prisma.product.findMany({
         where: { retailerId: retailerProfile.id, wholesalerId: null }
@@ -67,7 +73,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         where: {
           sale: {
             retailerId: retailerProfile.id
-          }
+          },
+          ...(dateFilter ? ({ createdAt: dateFilter } as any) : {})
         },
         _sum: {
           units: true
@@ -81,7 +88,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     const sales = await prisma.sale.findMany({
       where: {
         retailerId: retailerProfile.id,
-        status: { not: 'cancelled' }  // Exclude cancelled orders from revenue
+        status: { not: 'cancelled' },  // Exclude cancelled orders from revenue
+        ...(dateFilter ? { createdAt: dateFilter } : {})
       },
       include: {
         saleItems: {

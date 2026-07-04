@@ -720,6 +720,7 @@ model RetailerProfile {
   walletBalance       Float                @default(0)
   isVerified          Boolean              @default(false)
   linkedWholesalerId  Int?                 // Enforces ONE Retailer -> ONE Wholesaler linking
+  lastSettlementDate  DateTime?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @default(now()) @updatedAt
   branches            Branch[]
@@ -732,6 +733,7 @@ model RetailerProfile {
   linkedWholesaler    WholesalerProfile?   @relation("WholesalerRetailers", fields: [linkedWholesalerId], references: [id], map: "RetailerProfile_linkedWholesalerId_fkey")
   sales               Sale[]
   settlementInvoices  SettlementInvoice[]  @relation("RetailerInvoices")
+  customProfitInvoices CustomProfitInvoice[] @relation("RetailerCustomInvoices")
   walletTransactions  WalletTransaction[]
 
   @@index([linkedWholesalerId], map: "RetailerProfile_linkedWholesalerId_fkey")
@@ -882,6 +884,7 @@ model WholesalerProfile {
   tinNumber           String?
   address             String?
   isVerified          Boolean              @default(false)
+  lastSettlementDate  DateTime?
   receivedOrders      Order[]
   inventory           Product[]
   suppliers           Supplier[]
@@ -890,6 +893,7 @@ model WholesalerProfile {
   wholesalerSettings  WholesalerSettings?
   linkedRetailers     RetailerProfile[]    @relation("WholesalerRetailers")
   settlementInvoices  SettlementInvoice[]  @relation("WholesalerInvoices")
+  customProfitInvoices CustomProfitInvoice[] @relation("WholesalerCustomInvoices")
   linkRequests        LinkRequest[]        @relation("WholesalerLinkRequests")
 
   @@map("wholesalerprofile")
@@ -1128,6 +1132,8 @@ model CustomProfitInvoice {
   id                Int      @id @default(autoincrement())
   recipientType     String   // 'Retailer' or 'Wholesaler'
   recipientName     String
+  retailerId        Int?
+  wholesalerId      Int?
   totalRevenue      Float
   grossProfit       Float
   tax               Float
@@ -1138,6 +1144,7 @@ model CustomProfitInvoice {
   companyShareAmt   Float
   rewardsPoolPct    Float
   rewardsPoolAmt    Float
+  rewardsGivenAmt   Float    @default(0)
   rentExpense       Float
   salariesExpense   Float
   otherExpense      Float
@@ -1145,6 +1152,9 @@ model CustomProfitInvoice {
   finalPayable      Float
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  retailerProfile   RetailerProfile?   @relation("RetailerCustomInvoices", fields: [retailerId], references: [id])
+  wholesalerProfile WholesalerProfile? @relation("WholesalerCustomInvoices", fields: [wholesalerId], references: [id])
 
   @@map("custom_profit_invoices")
 }

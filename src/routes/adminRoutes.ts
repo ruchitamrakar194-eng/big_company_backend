@@ -76,7 +76,9 @@ import {
   getRefundRequests,
   processRefundRequest,
   getAdminProfitInvoices,
-  generateAdminProfitInvoice
+  generateAdminProfitInvoice,
+  getProfitInvoiceRecipients,
+  getProfitInvoiceStats
 } from '../controllers/adminController';
 import { getSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../controllers/supplierController';
 import { getJobs, createJob, updateJob, deleteJob, getApplications, createApplication, updateApplicationStatus } from '../controllers/recruitmentController';
@@ -220,6 +222,8 @@ router.delete('/settlement-invoices/:id', deleteSettlementInvoice);
 // ==========================================
 router.get('/profit-invoices', getAdminProfitInvoices);
 router.post('/profit-invoices/generate', generateAdminProfitInvoice);
+router.get('/profit-invoices/recipients', getProfitInvoiceRecipients);
+router.get('/profit-invoices/stats/:type/:id', getProfitInvoiceStats);
 
 // ==========================================
 // WHOLESALE ORDER MANAGEMENT

@@ -1566,6 +1566,10 @@ export const deleteCustomer = async (req: AuthRequest, res: Response) => {
         where: { consumerId: Number(id) },
         data: { consumerId: null, status: 'inactive' }
       }),
+      // 7.5 Delete Sale Items
+      prisma.saleItem.deleteMany({
+        where: { sale: { consumerId: Number(id) } }
+      }),
       // 8. Delete Sales (if they belong to this consumer)
       prisma.sale.deleteMany({ where: { consumerId: Number(id) } }),
       // 9. Delete Settings
@@ -4043,6 +4047,7 @@ export const generateAdminProfitInvoice = async (req: AuthRequest, res: Response
   try {
     const {
       recipientType,
+      recipientId,
       recipientName,
       totalRevenue,
       grossProfit,
@@ -4054,6 +4059,7 @@ export const generateAdminProfitInvoice = async (req: AuthRequest, res: Response
       companyShareAmt,
       rewardsPoolPct,
       rewardsPoolAmt,
+      rewardsGivenAmt,
       rentExpense,
       salariesExpense,
       otherExpense,
@@ -4061,33 +4067,165 @@ export const generateAdminProfitInvoice = async (req: AuthRequest, res: Response
       finalPayable
     } = req.body;
 
-    if (!recipientType || !recipientName) {
-      return res.status(400).json({ success: false, error: 'Recipient Type and Name are required' });
+    if (!recipientType || !recipientId) {
+      return res.status(400).json({ success: false, error: 'Recipient Type and ID are required' });
     }
 
-    const newInvoice = await prisma.customProfitInvoice.create({
-      data: {
-        recipientType,
-        recipientName,
-        totalRevenue: Number(totalRevenue) || 0,
-        grossProfit: Number(grossProfit) || 0,
-        tax: Number(tax) || 0,
-        netProfit: Number(netProfit) || 0,
-        recipientSharePct: Number(recipientSharePct) || 0,
-        recipientShareAmt: Number(recipientShareAmt) || 0,
-        companySharePct: Number(companySharePct) || 0,
-        companyShareAmt: Number(companyShareAmt) || 0,
-        rewardsPoolPct: Number(rewardsPoolPct) || 0,
-        rewardsPoolAmt: Number(rewardsPoolAmt) || 0,
-        rentExpense: Number(rentExpense) || 0,
-        salariesExpense: Number(salariesExpense) || 0,
-        otherExpense: Number(otherExpense) || 0,
-        totalExpense: Number(totalExpense) || 0,
-        finalPayable: Number(finalPayable) || 0
+    const data: any = {
+      recipientType,
+      recipientName,
+      totalRevenue: Number(totalRevenue) || 0,
+      grossProfit: Number(grossProfit) || 0,
+      tax: Number(tax) || 0,
+      netProfit: Number(netProfit) || 0,
+      recipientSharePct: Number(recipientSharePct) || 0,
+      recipientShareAmt: Number(recipientShareAmt) || 0,
+      companySharePct: Number(companySharePct) || 0,
+      companyShareAmt: Number(companyShareAmt) || 0,
+      rewardsPoolPct: Number(rewardsPoolPct) || 0,
+      rewardsPoolAmt: Number(rewardsPoolAmt) || 0,
+      rewardsGivenAmt: Number(rewardsGivenAmt) || 0,
+      rentExpense: Number(rentExpense) || 0,
+      salariesExpense: Number(salariesExpense) || 0,
+      otherExpense: Number(otherExpense) || 0,
+      totalExpense: Number(totalExpense) || 0,
+      finalPayable: Number(finalPayable) || 0
+    };
+
+    if (recipientType === 'Retailer') {
+      data.retailerId = Number(recipientId);
+    } else {
+      data.wholesalerId = Number(recipientId);
+    }
+
+    const newInvoice = await prisma.$transaction(async (tx) => {
+      const invoice = await tx.customProfitInvoice.create({ data });
+
+      // Reset stats (by updating lastSettlementDate)
+      const now = new Date();
+      if (recipientType === 'Retailer') {
+        await tx.retailerProfile.update({
+          where: { id: Number(recipientId) },
+          data: { lastSettlementDate: now }
+        });
+      } else {
+        await tx.wholesalerProfile.update({
+          where: { id: Number(recipientId) },
+          data: { lastSettlementDate: now }
+        });
       }
+
+      return invoice;
     });
 
     res.json({ success: true, message: 'Profit invoice generated successfully', data: newInvoice });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const getProfitInvoiceRecipients = async (req: AuthRequest, res: Response) => {
+  try {
+    const retailers = await prisma.retailerProfile.findMany({
+      where: { isVerified: true },
+      select: { id: true, shopName: true }
+    });
+    
+    const wholesalers = await prisma.wholesalerProfile.findMany({
+      where: { isVerified: true },
+      select: { id: true, companyName: true }
+    });
+
+    const formattedRetailers = retailers.map(r => ({ id: r.id, name: r.shopName, type: 'Retailer' }));
+    const formattedWholesalers = wholesalers.map(w => ({ id: w.id, name: w.companyName, type: 'Wholesaler' }));
+
+    res.json({ success: true, data: [...formattedRetailers, ...formattedWholesalers] });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => {
+  try {
+    const { type, id } = req.params;
+    let totalRevenue = 0;
+    let totalCost = 0;
+    let gasRewardsGiven = 0;
+    
+    if (type === 'Retailer') {
+      const retailer = await prisma.retailerProfile.findUnique({ where: { id: Number(id) } });
+      if (!retailer) return res.status(404).json({ success: false, error: 'Retailer not found' });
+      
+      const dateFilter = retailer.lastSettlementDate ? { gte: retailer.lastSettlementDate } : undefined;
+      
+      const sales = await prisma.sale.findMany({
+        where: {
+          retailerId: Number(id),
+          status: { not: 'cancelled' },
+          ...(dateFilter ? { createdAt: dateFilter } : {})
+        },
+        include: { saleItems: { include: { product: true } } }
+      });
+      
+      for (const sale of sales) {
+        for (const item of sale.saleItems) {
+          totalRevenue += (item.price * item.quantity);
+          totalCost += ((item.product.costPrice || 0) * item.quantity);
+        }
+      }
+      
+      const rewards = await prisma.gasReward.aggregate({
+        where: {
+          sale: { retailerId: Number(id) },
+          ...(dateFilter ? { createdAt: dateFilter } : {})
+        },
+        _sum: { units: true }
+      });
+      
+      gasRewardsGiven = rewards._sum.units || 0;
+      
+      res.json({
+        success: true,
+        data: {
+          totalRevenue,
+          grossProfit: totalRevenue - totalCost,
+          gasRewardsGiven
+        }
+      });
+      
+    } else if (type === 'Wholesaler') {
+      const wholesaler = await prisma.wholesalerProfile.findUnique({ where: { id: Number(id) } });
+      if (!wholesaler) return res.status(404).json({ success: false, error: 'Wholesaler not found' });
+      
+      const dateFilter = wholesaler.lastSettlementDate ? { gte: wholesaler.lastSettlementDate } : undefined;
+      
+      const orders = await prisma.order.findMany({
+        where: {
+          wholesalerId: Number(id),
+          status: 'completed',
+          ...(dateFilter ? { createdAt: dateFilter } : {})
+        },
+        include: { orderItems: { include: { product: true } } }
+      });
+      
+      for (const order of orders) {
+        for (const item of order.orderItems) {
+          totalRevenue += (item.price * item.quantity);
+          totalCost += ((item.product.costPrice || 0) * item.quantity);
+        }
+      }
+      
+      res.json({
+        success: true,
+        data: {
+          totalRevenue,
+          grossProfit: totalRevenue - totalCost,
+          gasRewardsGiven: 0
+        }
+      });
+    } else {
+      res.status(400).json({ success: false, error: 'Invalid type' });
+    }
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
