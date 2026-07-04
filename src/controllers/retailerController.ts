@@ -2112,33 +2112,14 @@ export const requestCredit = async (req: AuthRequest, res: Response) => {
     }
 
     // Check if there is an active outstanding loan
-    if (credit && credit.usedCredit > 0) {
+    const activeLoan = await (prisma as any).retailerLoan.findFirst({
+      where: { retailerId: retailerProfile.id, status: 'active' }
+    });
+
+    if (activeLoan) {
       return res.status(400).json({
         error: 'You have an active outstanding loan. You must repay your current loan in full before requesting a new one.'
       });
-    }
-
-    // Single Active Credit Rule: check if there is an approved loan that has not yet been used
-    const latestApprovedRequest = await prisma.creditRequest.findFirst({
-      where: { retailerId: retailerProfile.id, status: 'approved' },
-      orderBy: { updatedAt: 'desc' }
-    });
-
-    if (latestApprovedRequest) {
-      // Check if they placed any credit orders since this latest request was approved
-      const creditOrdersCount = await prisma.order.count({
-        where: {
-          retailerId: retailerProfile.id,
-          paymentMethod: 'credit',
-          createdAt: { gte: latestApprovedRequest.updatedAt || latestApprovedRequest.createdAt }
-        }
-      });
-
-      if (creditOrdersCount === 0) {
-        return res.status(400).json({
-          error: 'You already have an active approved credit limit that has not been used yet.'
-        });
-      }
     }
 
     // Create CreditRequest
