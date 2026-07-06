@@ -4174,15 +4174,20 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
         }
       }
       
-      const rewards = await prisma.gasReward.aggregate({
-        where: {
-          sale: { retailerId: Number(id) },
-          ...(dateFilter ? { createdAt: dateFilter } : {})
-        },
-        _sum: { units: true }
-      });
+      const [rewards, systemConfig] = await Promise.all([
+        prisma.gasReward.aggregate({
+          where: {
+            sale: { retailerId: Number(id) },
+            ...(dateFilter ? { createdAt: dateFilter } : {})
+          },
+          _sum: { units: true }
+        }),
+        prisma.systemConfig.findFirst()
+      ]);
       
-      gasRewardsGiven = rewards._sum.units || 0;
+      const gasUnits = rewards._sum.units || 0;
+      const gasPrice = systemConfig?.gasPricePerM3 || 6500;
+      gasRewardsGiven = Math.round(gasUnits * gasPrice);
       
       res.json({
         success: true,

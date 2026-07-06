@@ -3738,12 +3738,14 @@ export const getGasRewardsGiven = async (req: AuthRequest, res: Response) => {
     }
 
     const { limit = '20', offset = '0' } = req.query;
+    const dateFilter = retailerProfile.lastSettlementDate ? { gte: retailerProfile.lastSettlementDate } : undefined;
 
     const rewards = await prisma.gasReward.findMany({
       where: {
         sale: {
           retailerId: retailerProfile.id
-        }
+        },
+        ...(dateFilter ? { createdAt: dateFilter } : {})
       },
       include: {
         consumerProfile: {
@@ -3766,7 +3768,8 @@ export const getGasRewardsGiven = async (req: AuthRequest, res: Response) => {
       where: {
         sale: {
           retailerId: retailerProfile.id
-        }
+        },
+        ...(dateFilter ? { createdAt: dateFilter } : {})
       }
     });
 
@@ -3776,7 +3779,8 @@ export const getGasRewardsGiven = async (req: AuthRequest, res: Response) => {
         where: {
           sale: {
             retailerId: retailerProfile.id
-          }
+          },
+          ...(dateFilter ? { createdAt: dateFilter } : {})
         },
         _sum: {
           units: true
