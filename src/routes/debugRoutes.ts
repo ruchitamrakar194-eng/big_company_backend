@@ -92,6 +92,67 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.get('/fix-taxes', async (req, res) => {
+  try {
+    const results = [];
+    const retailerProducts = await prisma.product.findMany({
+      where: {
+        retailerId: { not: null }
+      }
+    });
+
+    for (const product of retailerProducts) {
+      const wholesalerProduct = await prisma.product.findFirst({
+        where: {
+          name: product.name,
+          retailerId: null,
+          wholesalerId: { not: null }
+        }
+      });
+
+      if (wholesalerProduct) {
+        const correctTaxType = wholesalerProduct.taxType || 'B';
+        
+        if (product.taxType !== correctTaxType) {
+          const config = await prisma.systemConfig.findFirst();
+          const retailerMarkup = (config as any)?.retailerMarkup || 20;
+          
+          let cleanCost = product.costPrice || product.price;
+          if (!product.costPrice) {
+            const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+            const reversed = reverseVATCalculation(product.price, product.taxType);
+            cleanCost = reversed.cleanBaseCost;
+          }
+
+          const markupPrice = cleanCost * (1 + retailerMarkup / 100);
+          const vatMultiplier = correctTaxType === 'B' ? 1.18 : 1;
+          const newPrice = wholesalerProduct.retailerPrice || Math.ceil(markupPrice * vatMultiplier);
+
+          await prisma.product.update({
+            where: { id: product.id },
+            data: {
+              taxType: correctTaxType,
+              price: newPrice,
+              costPrice: cleanCost
+            }
+          });
+
+          results.push({
+            name: product.name,
+            taxType: `${product.taxType} -> ${correctTaxType}`,
+            price: `${product.price} -> ${newPrice} RWF`,
+            costPrice: cleanCost
+          });
+        }
+      }
+    }
+
+    res.json({ success: true, updated: results });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // === GPRS METER DIAGNOSTIC TEST ===
 router.get('/gprs-test', async (req, res) => {
   const imei = (req.query.imei as string) || '865395070835713';
