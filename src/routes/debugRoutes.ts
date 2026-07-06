@@ -53,7 +53,7 @@ router.get('/', async (req, res) => {
     let dbStatus = 'Unknown';
     let userCount = -1;
     let errorDetail = null;
-    
+
     try {
       userCount = await prisma.user.count();
       dbStatus = 'Connected';
@@ -64,8 +64,8 @@ router.get('/', async (req, res) => {
 
     // 3. Check Env Vars (Masked)
     const dbUrl = process.env.DATABASE_URL || 'Not Set';
-    const maskedDbUrl = dbUrl.length > 20 
-      ? `${dbUrl.substring(0, 10)}...${dbUrl.substring(dbUrl.length - 10)}` 
+    const maskedDbUrl = dbUrl.length > 20
+      ? `${dbUrl.substring(0, 10)}...${dbUrl.substring(dbUrl.length - 10)}`
       : dbUrl;
 
     res.json({
@@ -84,10 +84,10 @@ router.get('/', async (req, res) => {
       }
     });
   } catch (error: any) {
-    res.status(500).json({ 
-      error: 'Debug endpoint failed', 
+    res.status(500).json({
+      error: 'Debug endpoint failed',
       message: error.message,
-      stack: error.stack 
+      stack: error.stack
     });
   }
 });
@@ -155,7 +155,7 @@ router.get('/fix-taxes', async (req, res) => {
         const correctTaxType = wholesalerProduct.taxType || 'B';
         const config = await prisma.systemConfig.findFirst();
         const retailerMarkup = (config as any)?.retailerMarkup || 20;
-        
+
         let cleanCost = product.costPrice || product.price;
         if (!product.costPrice) {
           const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
@@ -189,6 +189,7 @@ router.get('/fix-taxes', async (req, res) => {
       }
     }
 
+
     // Correct past invoices that have volume instead of value stored
     const pastInvoices = await prisma.customProfitInvoice.findMany({
       where: {
@@ -200,7 +201,7 @@ router.get('/fix-taxes', async (req, res) => {
       const systemConfig = await prisma.systemConfig.findFirst();
       const gasPrice = systemConfig?.gasPricePerM3 || 6500;
       const correctRewardsVal = Math.round(inv.rewardsGivenAmt * gasPrice);
-      
+
       const newTotalExpense = inv.rentExpense + inv.salariesExpense + inv.otherExpense + correctRewardsVal;
       const newNetProfit = Math.max(0, inv.grossProfit - newTotalExpense - inv.tax);
       const newRecipientShare = Math.round(newNetProfit * (inv.recipientSharePct / 100) * 100) / 100;
@@ -217,7 +218,7 @@ router.get('/fix-taxes', async (req, res) => {
           finalPayable: newRecipientShare
         }
       });
-      
+
       results.push({
         invoiceId: inv.id,
         recipientName: inv.recipientName,
@@ -252,7 +253,7 @@ router.get('/gprs-test', async (req, res) => {
       { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 10000 }
     );
     const apiToken = loginResp.data?.value?.apiToken;
-    results.login = { success: !!apiToken, apiToken: apiToken ? `${apiToken.substring(0,8)}...` : null, fullResponse: loginResp.data };
+    results.login = { success: !!apiToken, apiToken: apiToken ? `${apiToken.substring(0, 8)}...` : null, fullResponse: loginResp.data };
 
     if (!apiToken) {
       return res.json({ ...results, error: 'Login failed' });
@@ -260,13 +261,13 @@ router.get('/gprs-test', async (req, res) => {
 
     // Test all combinations
     const testCases = [
-      { name: 'zlMeter+remotelyTopUp+imei',    action: 'zlMeter',     method: 'remotelyTopUp',  paramKey: 'imei',   extraParams: { topUpAmount: '1', topUpToDeviceAmount: '1' } },
-      { name: 'zlMeter+remotelyTopUp+devEui',  action: 'zlMeter',     method: 'remotelyTopUp',  paramKey: 'devEui', extraParams: { topUpAmount: '1', topUpToDeviceAmount: '1' } },
-      { name: 'lorawanMeter+remotelyTopUp+imei',action:'lorawanMeter', method: 'remotelyTopUp',  paramKey: 'imei',   extraParams: { topUpAmount: '1', topUpToDeviceAmount: '1' } },
-      { name: 'lorawanMeter+remotelyTopUp+devEui',action:'lorawanMeter',method:'remotelyTopUp', paramKey: 'devEui', extraParams: { topUpAmount: '1', topUpToDeviceAmount: '1' } },
-      { name: 'zlMeter+queryMeterInfo+imei',   action: 'zlMeter',     method: 'queryMeterInfo', paramKey: 'imei',   extraParams: {} },
-      { name: 'lorawanMeter+queryMeterInfo+imei',action:'lorawanMeter',method:'queryMeterInfo', paramKey: 'imei',   extraParams: {} },
-      { name: 'lorawanMeter+queryMeterInfo+devEui',action:'lorawanMeter',method:'queryMeterInfo',paramKey:'devEui', extraParams: {} },
+      { name: 'zlMeter+remotelyTopUp+imei', action: 'zlMeter', method: 'remotelyTopUp', paramKey: 'imei', extraParams: { topUpAmount: '1', topUpToDeviceAmount: '1' } },
+      { name: 'zlMeter+remotelyTopUp+devEui', action: 'zlMeter', method: 'remotelyTopUp', paramKey: 'devEui', extraParams: { topUpAmount: '1', topUpToDeviceAmount: '1' } },
+      { name: 'lorawanMeter+remotelyTopUp+imei', action: 'lorawanMeter', method: 'remotelyTopUp', paramKey: 'imei', extraParams: { topUpAmount: '1', topUpToDeviceAmount: '1' } },
+      { name: 'lorawanMeter+remotelyTopUp+devEui', action: 'lorawanMeter', method: 'remotelyTopUp', paramKey: 'devEui', extraParams: { topUpAmount: '1', topUpToDeviceAmount: '1' } },
+      { name: 'zlMeter+queryMeterInfo+imei', action: 'zlMeter', method: 'queryMeterInfo', paramKey: 'imei', extraParams: {} },
+      { name: 'lorawanMeter+queryMeterInfo+imei', action: 'lorawanMeter', method: 'queryMeterInfo', paramKey: 'imei', extraParams: {} },
+      { name: 'lorawanMeter+queryMeterInfo+devEui', action: 'lorawanMeter', method: 'queryMeterInfo', paramKey: 'devEui', extraParams: {} },
     ];
 
     for (const tc of testCases) {
