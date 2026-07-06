@@ -189,6 +189,43 @@ router.get('/fix-taxes', async (req, res) => {
       }
     }
 
+    // Correct past invoices that have volume instead of value stored
+    const pastInvoices = await prisma.customProfitInvoice.findMany({
+      where: {
+        rewardsGivenAmt: { gt: 0, lt: 10 }
+      }
+    });
+
+    for (const inv of pastInvoices) {
+      const systemConfig = await prisma.systemConfig.findFirst();
+      const gasPrice = systemConfig?.gasPricePerM3 || 6500;
+      const correctRewardsVal = Math.round(inv.rewardsGivenAmt * gasPrice);
+      
+      const newTotalExpense = inv.rentExpense + inv.salariesExpense + inv.otherExpense + correctRewardsVal;
+      const newNetProfit = Math.max(0, inv.grossProfit - newTotalExpense - inv.tax);
+      const newRecipientShare = Math.round(newNetProfit * (inv.recipientSharePct / 100) * 100) / 100;
+      const newCompanyShare = Math.round(newNetProfit * (inv.companySharePct / 100) * 100) / 100;
+
+      await prisma.customProfitInvoice.update({
+        where: { id: inv.id },
+        data: {
+          rewardsGivenAmt: correctRewardsVal,
+          totalExpense: newTotalExpense,
+          netProfit: newNetProfit,
+          recipientShareAmt: newRecipientShare,
+          companyShareAmt: newCompanyShare,
+          finalPayable: newRecipientShare
+        }
+      });
+      
+      results.push({
+        invoiceId: inv.id,
+        recipientName: inv.recipientName,
+        rewardsGivenAmt: `${inv.rewardsGivenAmt} -> ${correctRewardsVal} RWF`,
+        netProfit: `${inv.netProfit} -> ${newNetProfit} RWF`
+      });
+    }
+
     res.json({ success: true, updated: results });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
