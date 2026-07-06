@@ -124,6 +124,15 @@ router.get('/check-retailer-products', async (req, res) => {
   }
 });
 
+router.get('/check-invoices', async (req, res) => {
+  try {
+    const invoices = await prisma.customProfitInvoice.findMany();
+    res.json(invoices);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/fix-taxes', async (req, res) => {
   try {
     const results = [];
