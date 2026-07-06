@@ -397,9 +397,18 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
             addStock = item.quantity * conversionFactor;
           }
 
+          // Calculate/Recalculate final retail price: (cost + markup) + 18% VAT for Type B products
+          const config = await prisma.systemConfig.findFirst();
+          const retailerMarkup = (config as any)?.retailerMarkup || 20;
+          const invoiceMarkupPrice = cleanCost * (1 + retailerMarkup / 100);
+          const invoiceVatMultiplier = taxType === 'B' ? 1.18 : 1;
+          const invoiceFinalPrice = sourceProduct.retailerPrice || Math.ceil(invoiceMarkupPrice * invoiceVatMultiplier);
+
           const updateData: any = {
             stock: { increment: addStock },
             costPrice: cleanCost,
+            price: invoiceFinalPrice,
+            taxType: taxType,
             status: 'active',
             barcode: sourceProduct.barcode // Ensure barcode is set/updated
           };
@@ -440,6 +449,7 @@ export const createProduct = async (req: AuthRequest, res: Response) => {
               baseUnit: (sourceProduct as any).baseUnit,
               purchaseUnit: (sourceProduct as any).purchaseUnit,
               conversionFactor: (sourceProduct as any).conversionFactor,
+              taxType: invoiceTaxType,
               invoiceNumber: invoice_number,
               retailerId: retailerProfile.id,
               image: sourceProduct.image,
