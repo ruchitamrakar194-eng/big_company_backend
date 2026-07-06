@@ -111,6 +111,19 @@ router.get('/check-wholesaler-products', async (req, res) => {
   }
 });
 
+router.get('/check-retailer-products', async (req, res) => {
+  try {
+    const products = await prisma.product.findMany({
+      where: {
+        retailerId: { not: null }
+      }
+    });
+    res.json(products);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/fix-taxes', async (req, res) => {
   try {
     const results = [];
