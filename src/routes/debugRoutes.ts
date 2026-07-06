@@ -144,22 +144,23 @@ router.get('/fix-taxes', async (req, res) => {
 
       if (wholesalerProduct) {
         const correctTaxType = wholesalerProduct.taxType || 'B';
+        const config = await prisma.systemConfig.findFirst();
+        const retailerMarkup = (config as any)?.retailerMarkup || 20;
         
-        if (product.taxType !== correctTaxType) {
-          const config = await prisma.systemConfig.findFirst();
-          const retailerMarkup = (config as any)?.retailerMarkup || 20;
-          
-          let cleanCost = product.costPrice || product.price;
-          if (!product.costPrice) {
-            const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
-            const reversed = reverseVATCalculation(product.price, product.taxType);
-            cleanCost = reversed.cleanBaseCost;
-          }
+        let cleanCost = product.costPrice || product.price;
+        if (!product.costPrice) {
+          const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+          const reversed = reverseVATCalculation(product.price, product.taxType);
+          cleanCost = reversed.cleanBaseCost;
+        }
 
-          const markupPrice = cleanCost * (1 + retailerMarkup / 100);
-          const vatMultiplier = correctTaxType === 'B' ? 1.18 : 1;
-          const newPrice = wholesalerProduct.retailerPrice || Math.ceil(markupPrice * vatMultiplier);
+        const markupPrice = cleanCost * (1 + retailerMarkup / 100);
+        const vatMultiplier = correctTaxType === 'B' ? 1.18 : 1;
+        const newPrice = (wholesalerProduct.retailerPrice && wholesalerProduct.retailerPrice > cleanCost)
+          ? wholesalerProduct.retailerPrice
+          : Math.ceil(markupPrice * vatMultiplier);
 
+        if (product.taxType !== correctTaxType || product.price !== newPrice) {
           await prisma.product.update({
             where: { id: product.id },
             data: {
