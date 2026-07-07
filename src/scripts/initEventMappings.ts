@@ -54,6 +54,18 @@ const EVENT_MAPPINGS = [
   { slug: 'customer-failed-login', template: 'CUS-SMS-011', desc: 'Failed login on customer account' },
   { slug: 'customer-account-status', template: 'CUS-SMS-012', desc: 'Customer account activation/deactivation' },
   
+  // Customer Email Events
+  { slug: 'customer-signup-email', template: 'CUS-EMAIL-001', desc: 'Customer account created welcome email' },
+  { slug: 'customer-order-delivered-email', template: 'CUS-EMAIL-002', desc: 'Customer order delivered confirmation email' },
+  { slug: 'customer-wallet-topup-email', template: 'CUS-EMAIL-003', desc: 'Customer wallet top-up confirmation email' },
+  { slug: 'customer-gas-recharge-email', template: 'CUS-EMAIL-004', desc: 'Customer gas meter recharge receipt email' },
+  { slug: 'customer-reward-update-email', template: 'CUS-EMAIL-006', desc: 'Customer gas reward update notification email' },
+  { slug: 'customer-security-update-email', template: 'CUS-EMAIL-007', desc: 'Customer PIN/password security alert email' },
+  { slug: 'customer-failed-login-email', template: 'CUS-EMAIL-008', desc: 'Failed login security warning email' },
+  { slug: 'customer-refund-request-email', template: 'CUS-EMAIL-009', desc: 'Customer refund request email' },
+  { slug: 'customer-account-status-email', template: 'CUS-EMAIL-010', desc: 'Customer account status activation/deactivation email' },
+  { slug: 'customer-system-notification', template: 'CUS-EMAIL-011', desc: 'Customer general system notification email' },
+  
   // System/Auth Common Events
   { slug: 'password-reset', template: 'SYS-EMAIL-002', desc: 'Password reset temporary credentials email' },
   { slug: 'password-reset-SMS', template: 'SYS-SMS-002', desc: 'Password reset temporary credentials SMS' },

@@ -817,6 +817,199 @@ const WHOLESALER_TEMPLATES = [
   }
 ];
 
+const CUSTOMER_EMAIL_TEMPLATES = [
+  {
+    name: 'CUS-EMAIL-001',
+    subject: 'Welcome to BIG Energy - Customer Account Created',
+    description: 'Welcome email for customer signup',
+    triggerName: 'Customer account welcome email',
+    requiredVariables: 'customer_name,customer_id',
+    content: `
+      <h2>Welcome to BIG Energy!</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>Your customer account has been created successfully.</p>
+      <p><strong>Your Details:</strong></p>
+      <ul>
+        <li>Customer ID: {{customer_id}}</li>
+      </ul>
+      <p>Please keep your login credentials and card PIN secure at all times.</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-002',
+    subject: 'Order Delivered - Receipt',
+    description: 'Order delivery confirmation receipt',
+    content: `
+      <h2>Order Receipt Notification</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>Your order <strong>{{order_id}}</strong> has been successfully delivered.</p>
+      <p><strong>Transaction Summary:</strong></p>
+      <ul>
+        <li>Order ID: {{order_id}}</li>
+        <li>Delivery Date: {{delivery_date}}</li>
+        <li>Amount: {{amount}} RWF</li>
+      </ul>
+      <p>Thank you for shopping with us!</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-003',
+    subject: 'Wallet Top-Up Successful',
+    description: 'Confirmation email for customer wallet top-up',
+    content: `
+      <h2>Wallet Top-Up Successful</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>Your wallet top-up was processed successfully.</p>
+      <p><strong>Transaction Details:</strong></p>
+      <ul>
+        <li>Amount: {{amount}} RWF</li>
+        <li>New Balance: {{new_balance}} RWF</li>
+        <li>Reference ID: {{transaction_id}}</li>
+      </ul>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-004',
+    subject: 'Gas Meter Recharge Receipt',
+    description: 'Receipt email for successful gas meter recharge',
+    content: `
+      <h2>Gas Meter Recharge Confirmation</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>Your gas recharge for <strong>{{meter_name}}</strong> ({{meter_id}}) was successful.</p>
+      <p><strong>Receipt Details:</strong></p>
+      <ul>
+        <li>Recharge Amount: {{amount}} RWF</li>
+        <li>Token Code: <strong>{{token}}</strong></li>
+        <li>Reference ID: {{transaction_id}}</li>
+      </ul>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-006',
+    subject: 'Gas Reward Balance Updated',
+    description: 'Notification email when customer earns gas rewards',
+    content: `
+      <h2>You Earned Gas Rewards!</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>Congratulations! You have received a new gas reward of <strong>{{reward_amount}} M³</strong> from your recent purchase.</p>
+      <p><strong>Reward Summary:</strong></p>
+      <ul>
+        <li>New Reward Balance: <strong>{{new_reward_balance}} M³</strong></li>
+      </ul>
+      <p>You can redeem your rewards at any time through your customer portal.</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-007',
+    subject: 'PIN or Password Security Alert',
+    description: 'Security notification for PIN or password updates',
+    content: `
+      <h2>Security Alert - Credentials Updated</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>This is to confirm that your customer account PIN or password was successfully updated at <strong>{{change_time}}</strong>.</p>
+      <p>If you did not make this change, please contact our support team immediately at +250788541239 to secure your account.</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-008',
+    subject: 'Security Alert - Failed Login Attempt',
+    description: 'Security notification for failed login detection',
+    content: `
+      <h2>Failed Login Attempt Detected</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>The system detected a failed login attempt on your account at <strong>{{attempt_time}}</strong>.</p>
+      <p>If this was not you, we recommend changing your PIN or password immediately to keep your account safe.</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-009',
+    subject: 'Refund Request Update',
+    description: 'Confirmation email for customer refund request',
+    content: `
+      <h2>Refund Request Update</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>We have received your refund request. Our team is currently reviewing it.</p>
+      <p><strong>Request Details:</strong></p>
+      <ul>
+        <li>Refund Amount: {{amount}} RWF</li>
+        <li>Status: {{status}}</li>
+        <li>Submitted Date: {{date}}</li>
+      </ul>
+      <p>We will notify you once the request has been processed.</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-010',
+    subject: 'Account Status Update',
+    description: 'Notification email when customer account status changes',
+    content: `
+      <h2>Account Status Notification</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>This is to notify you that your customer account status has been updated.</p>
+      <p><strong>Details:</strong></p>
+      <ul>
+        <li>Status: <strong>{{status}}</strong></li>
+        <li>Update Date: {{date}}</li>
+      </ul>
+      <p>If you have any questions, please reach out to our support team.</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  },
+  {
+    name: 'CUS-EMAIL-011',
+    subject: 'System Notification',
+    description: 'General system announcement template for customers',
+    content: `
+      <h2>System Update Notification</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>We have a new update regarding our services.</p>
+      <p style="padding: 15px; background-color: #f8fafc; border-left: 4px solid #6366f1; border-radius: 4px;">
+        {{message}}
+      </p>
+      <p>Thank you for choosing BIG Energy.</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+  }
+];
+
 const CUSTOMER_SMS_TEMPLATES = [
   {
     name: 'CUS-SMS-001',
@@ -946,7 +1139,7 @@ const SYSTEM_TEMPLATES = [
 async function initTemplates() {
   console.log('🚀 Initializing BIG Energy Email & SMS Templates...');
   
-  const allTemplates = [...RETAILER_TEMPLATES, ...WHOLESALER_TEMPLATES, ...CUSTOMER_SMS_TEMPLATES, ...SYSTEM_TEMPLATES];
+  const allTemplates = [...RETAILER_TEMPLATES, ...WHOLESALER_TEMPLATES, ...CUSTOMER_EMAIL_TEMPLATES, ...CUSTOMER_SMS_TEMPLATES, ...SYSTEM_TEMPLATES];
 
   for (const templateData of allTemplates) {
     try {

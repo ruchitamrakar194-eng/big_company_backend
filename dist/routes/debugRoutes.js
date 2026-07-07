@@ -171,6 +171,33 @@ router.get('/check-invoices', (req, res) => __awaiter(void 0, void 0, void 0, fu
         res.status(500).json({ error: e.message });
     }
 }));
+router.get('/seed-templates', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { exec } = require('child_process');
+        const path = require('path');
+        const templatesScript = path.join(__dirname, '../scripts/initTemplates.js');
+        const mappingsScript = path.join(__dirname, '../scripts/initEventMappings.js');
+        exec(`node "${templatesScript}"`, (err1, stdout1, stderr1) => {
+            if (err1) {
+                return res.status(500).json({ error: 'Failed to seed templates', details: stderr1 || err1.message });
+            }
+            exec(`node "${mappingsScript}"`, (err2, stdout2, stderr2) => {
+                if (err2) {
+                    return res.status(500).json({ error: 'Failed to seed mappings', details: stderr2 || err2.message });
+                }
+                res.json({
+                    success: true,
+                    message: 'Templates and event mappings seeded successfully on production database!',
+                    templatesOutput: stdout1,
+                    mappingsOutput: stdout2
+                });
+            });
+        });
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+}));
 router.get('/fix-taxes', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const results = [];

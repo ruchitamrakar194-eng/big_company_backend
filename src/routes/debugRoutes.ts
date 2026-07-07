@@ -133,6 +133,36 @@ router.get('/check-invoices', async (req, res) => {
   }
 });
 
+router.get('/seed-templates', async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const path = require('path');
+    
+    const templatesScript = path.join(__dirname, '../scripts/initTemplates.js');
+    const mappingsScript = path.join(__dirname, '../scripts/initEventMappings.js');
+    
+    exec(`node "${templatesScript}"`, (err1: any, stdout1: any, stderr1: any) => {
+      if (err1) {
+        return res.status(500).json({ error: 'Failed to seed templates', details: stderr1 || err1.message });
+      }
+      
+      exec(`node "${mappingsScript}"`, (err2: any, stdout2: any, stderr2: any) => {
+        if (err2) {
+          return res.status(500).json({ error: 'Failed to seed mappings', details: stderr2 || err2.message });
+        }
+        
+        res.json({
+          success: true,
+          message: 'Templates and event mappings seeded successfully on production database!',
+          templatesOutput: stdout1,
+          mappingsOutput: stdout2
+        });
+      });
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 router.get('/fix-taxes', async (req, res) => {
   try {
