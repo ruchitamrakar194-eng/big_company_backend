@@ -137,16 +137,21 @@ router.get('/seed-templates', async (req, res) => {
   try {
     const { exec } = require('child_process');
     const path = require('path');
+    const fs = require('fs');
     
-    const templatesScript = path.join(__dirname, '../scripts/initTemplates.js');
-    const mappingsScript = path.join(__dirname, '../scripts/initEventMappings.js');
+    const isTS = __filename.endsWith('.ts');
+    const ext = isTS ? 'ts' : 'js';
+    const runner = isTS ? 'npx ts-node' : 'node';
     
-    exec(`node "${templatesScript}"`, (err1: any, stdout1: any, stderr1: any) => {
+    const templatesScript = path.join(__dirname, `../scripts/initTemplates.${ext}`);
+    const mappingsScript = path.join(__dirname, `../scripts/initEventMappings.${ext}`);
+    
+    exec(`${runner} "${templatesScript}"`, (err1: any, stdout1: any, stderr1: any) => {
       if (err1) {
         return res.status(500).json({ error: 'Failed to seed templates', details: stderr1 || err1.message });
       }
       
-      exec(`node "${mappingsScript}"`, (err2: any, stdout2: any, stderr2: any) => {
+      exec(`${runner} "${mappingsScript}"`, (err2: any, stdout2: any, stderr2: any) => {
         if (err2) {
           return res.status(500).json({ error: 'Failed to seed mappings', details: stderr2 || err2.message });
         }
