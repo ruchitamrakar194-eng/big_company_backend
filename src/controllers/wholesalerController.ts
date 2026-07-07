@@ -27,6 +27,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
+    const dateFilter = wholesalerProfile.lastSettlementDate ? { gte: wholesalerProfile.lastSettlementDate } : undefined;
+
     // Fetch all necessary data in parallel
     const [
       allOrders,
@@ -34,9 +36,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       allProducts,
       pendingCreditRequests
     ] = await Promise.all([
-      // All orders for total revenue
+      // All orders for total revenue (filtered by lastSettlementDate if set)
       prisma.order.findMany({
-        where: { wholesalerId: wholesalerProfile.id },
+        where: { 
+          wholesalerId: wholesalerProfile.id,
+          ...(dateFilter ? { createdAt: dateFilter } : {})
+        },
         include: {
           retailerProfile: {
             include: { user: true }
@@ -89,8 +94,10 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       sum + (p.stock * p.price), 0
     );
 
-    // Count pending orders
-    const pendingOrdersCount = allOrders.filter(o => o.status === 'pending').length;
+    // Count pending orders (not limited by settlement date so they don't disappear)
+    const pendingOrdersCount = await prisma.order.count({
+      where: { wholesalerId: wholesalerProfile.id, status: 'pending' }
+    });
 
     // Count pending credit requests
     const pendingCreditRequestsCount = pendingCreditRequests.length;
@@ -103,10 +110,13 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       return d;
     }).reverse();
 
-    // Fetch order items for top products
+    // Fetch order items for top products (filtered by lastSettlementDate if set)
     const orderItems = await prisma.orderItem.findMany({
       where: {
-        order: { wholesalerId: wholesalerProfile.id }
+        order: { 
+          wholesalerId: wholesalerProfile.id,
+          ...(dateFilter ? { createdAt: dateFilter } : {})
+        }
       },
       include: { product: true }
     });
