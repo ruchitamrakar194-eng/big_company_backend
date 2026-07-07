@@ -248,9 +248,9 @@ export const login = async (req: Request, res: Response) => {
       if (user.role === 'consumer' && user.email) {
         await emailQueue.add('failed-login-alert', {
           to: user.email,
-          templateType: 'login attempt',
+          templateType: 'customer-failed-login-email', // Mapped to CUS-EMAIL-008
           data: {
-            name: user.name || 'Customer',
+            customer_name: user.name || 'Customer',
             attempt_time: new Date().toLocaleString(),
             device: req.headers['user-agent'] || 'Unknown Device',
             ip: req.ip || 'Unknown'

@@ -1525,6 +1525,25 @@ export const updateCustomerStatus = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    if (updatedUser && updatedUser.email) {
+      try {
+        const { emailQueue } = await import('../queues/email.queue');
+        await emailQueue.add('customer-account-status-email', {
+          to: updatedUser.email,
+          templateType: 'customer-account-status-email', // Mapped to CUS-EMAIL-010
+          data: {
+            customer_name: updatedUser.name || 'Valued Customer',
+            status: newStatus ? 'activated' : 'deactivated',
+            date: new Date().toLocaleDateString(),
+            reason: newStatus ? 'Account activated or approved' : 'Account deactivated or suspended'
+          },
+          relatedEntity: { type: 'USER', id: updatedUser.id.toString() }
+        });
+      } catch (err: any) {
+        console.error('[AdminAPI] Failed to trigger customer-account-status-email notification:', err.message);
+      }
+    }
+
     res.json({ success: true, message: `Customer account ${newStatus ? 'activated' : 'deactivated'} successfully` });
   } catch (error: any) {
     console.error('[AdminAPI] updateCustomerStatus Error:', error);
