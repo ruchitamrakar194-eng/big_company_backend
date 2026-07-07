@@ -912,6 +912,25 @@ const CUSTOMER_EMAIL_TEMPLATES = [
     `
     },
     {
+        name: 'CUS-EMAIL-005',
+        subject: 'Password Reset - Your Temporary Password',
+        description: 'Customer password reset temporary credentials email',
+        content: `
+      <h2>Password Reset Request</h2>
+      <p>Hello {{customer_name}},</p>
+      <p>We received a request to reset your account password. A temporary password has been generated for your account:</p>
+      <div style="background-color: #f1f5f9; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0;">
+        <code style="font-size: 20px; font-weight: bold; color: #0f766e; letter-spacing: 1px;">{{temp_password}}</code>
+      </div>
+      <p style="color: #dc2626; font-size: 14px;"><strong>Important:</strong> You will be required to change this password immediately upon logging in.</p>
+      <p>If you did not request this password reset, please contact our support team immediately at +250788541239 to secure your account.</p>
+      <p>Regards,<br/>
+      Big Innovation Group Ltd<br/>
+      +250788541239<br/>
+      Info@big.co.rw</p>
+    `
+    },
+    {
         name: 'CUS-EMAIL-006',
         subject: 'Gas Reward Balance Updated',
         description: 'Notification email when customer earns gas rewards',

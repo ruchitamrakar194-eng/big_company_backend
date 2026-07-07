@@ -59,6 +59,7 @@ const EVENT_MAPPINGS = [
   { slug: 'customer-order-delivered-email', template: 'CUS-EMAIL-002', desc: 'Customer order delivered confirmation email' },
   { slug: 'customer-wallet-topup-email', template: 'CUS-EMAIL-003', desc: 'Customer wallet top-up confirmation email' },
   { slug: 'customer-gas-recharge-email', template: 'CUS-EMAIL-004', desc: 'Customer gas meter recharge receipt email' },
+  { slug: 'customer-password-reset-email', template: 'CUS-EMAIL-005', desc: 'Customer password reset temporary credentials email' },
   { slug: 'customer-reward-update-email', template: 'CUS-EMAIL-006', desc: 'Customer gas reward update notification email' },
   { slug: 'customer-security-update-email', template: 'CUS-EMAIL-007', desc: 'Customer PIN/password security alert email' },
   { slug: 'customer-failed-login-email', template: 'CUS-EMAIL-008', desc: 'Failed login security warning email' },
