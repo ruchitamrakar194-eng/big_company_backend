@@ -68,4 +68,6 @@ router.delete('/linked-retailers/:retailerId', wholesalerController_1.unlinkReta
 // Settlement Invoices (Read-only - Admin assigns these)
 router.get('/settlement-invoices', wholesalerController_1.getSettlementInvoices);
 router.get('/settlement-invoices/:id', wholesalerController_1.getSettlementInvoice);
+// Custom Profit Invoices (Read-only - Admin generates these)
+router.get('/profit-invoices', wholesalerController_1.getMyProfitInvoices);
 exports.default = router;

@@ -477,6 +477,7 @@ const approveCreditRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
     try {
         const { id } = req.params;
         const result = yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a;
             const creditRequest = yield tx.creditRequest.findUnique({
                 where: { id: Number(id) },
                 include: {
@@ -494,16 +495,37 @@ const approveCreditRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
                     reviewedAt: new Date()
                 }
             });
-            // Use upsert to handle both existing and non-existing credit records reliably
+            // Get system configuration for interest rate
+            const systemConfig = yield tx.systemConfig.findFirst();
+            const interestRate = (_a = systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.retailerLoanInterest) !== null && _a !== void 0 ? _a : 18;
+            const interestAmount = creditRequest.amount * (interestRate / 100);
+            const totalRepayable = creditRequest.amount + interestAmount;
+            // Create new Retailer Loan record
+            yield tx.retailerLoan.create({
+                data: {
+                    retailerId: creditRequest.retailerId,
+                    amount: creditRequest.amount,
+                    interestRate,
+                    totalRepayable,
+                    remainingAmount: totalRepayable,
+                    status: 'active'
+                }
+            });
+            // Add the approved loan principal amount directly to the retailer's cash wallet balance
+            yield tx.retailerProfile.update({
+                where: { id: creditRequest.retailerId },
+                data: {
+                    walletBalance: { increment: creditRequest.amount }
+                }
+            });
+            // Ensure retailerCredit record exists to prevent query joins from failing
             yield tx.retailerCredit.upsert({
                 where: { retailerId: creditRequest.retailerId },
-                update: {
-                    availableCredit: { increment: creditRequest.amount }
-                },
+                update: {},
                 create: {
                     retailerId: creditRequest.retailerId,
-                    creditLimit: creditRequest.amount,
-                    availableCredit: creditRequest.amount,
+                    creditLimit: 0,
+                    availableCredit: 0,
                     usedCredit: 0
                 }
             });
@@ -515,8 +537,8 @@ const approveCreditRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
                         amount: creditRequest.amount,
                         type: 'credit_extension',
                         status: 'completed',
-                        description: `Credit limit increased from request #${creditRequest.id}`,
-                        reference: `CR-${creditRequest.id}`
+                        description: `Approved loan of ${creditRequest.amount.toLocaleString()} RWF with ${interestRate}% interest (Total Repayable: ${totalRepayable.toLocaleString()} RWF)`,
+                        reference: `LN-${creditRequest.id}`
                     }
                 });
             }

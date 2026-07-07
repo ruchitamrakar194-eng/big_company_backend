@@ -371,7 +371,11 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 for (const item of items) {
                     const product = productMap.get(Number(item.productId));
                     if (product && product.costPrice) {
-                        const profitPerItem = Number(item.price) - Number(product.costPrice);
+                        let sellingPrice = Number(item.price);
+                        if (product.taxType === 'B') {
+                            sellingPrice = sellingPrice / 1.18;
+                        }
+                        const profitPerItem = sellingPrice - Number(product.costPrice);
                         if (profitPerItem > 0) {
                             totalProfit += profitPerItem * Number(item.quantity);
                         }

@@ -130,6 +130,134 @@ router.get('/', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         });
     }
 }));
+router.get('/check-wholesaler-products', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const products = yield prisma_1.default.product.findMany({
+            where: {
+                retailerId: null
+            }
+        });
+        res.json(products.map(p => ({
+            id: p.id,
+            name: p.name,
+            price: p.price,
+            retailerPrice: p.retailerPrice,
+            taxType: p.taxType
+        })));
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+}));
+router.get('/check-retailer-products', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const products = yield prisma_1.default.product.findMany({
+            where: {
+                retailerId: { not: null }
+            }
+        });
+        res.json(products);
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+}));
+router.get('/check-invoices', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const invoices = yield prisma_1.default.customProfitInvoice.findMany();
+        res.json(invoices);
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+}));
+router.get('/fix-taxes', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const results = [];
+        const retailerProducts = yield prisma_1.default.product.findMany({
+            where: {
+                retailerId: { not: null }
+            }
+        });
+        for (const product of retailerProducts) {
+            const wholesalerProduct = yield prisma_1.default.product.findFirst({
+                where: {
+                    name: product.name,
+                    retailerId: null,
+                    wholesalerId: { not: null }
+                }
+            });
+            if (wholesalerProduct) {
+                const correctTaxType = wholesalerProduct.taxType || 'B';
+                const config = yield prisma_1.default.systemConfig.findFirst();
+                const retailerMarkup = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
+                let cleanCost = product.costPrice || product.price;
+                if (!product.costPrice) {
+                    const { reverseVATCalculation } = require('../utils/pricingReversalUtils');
+                    const reversed = reverseVATCalculation(product.price, product.taxType);
+                    cleanCost = reversed.cleanBaseCost;
+                }
+                const markupPrice = cleanCost * (1 + retailerMarkup / 100);
+                const vatMultiplier = correctTaxType === 'B' ? 1.18 : 1;
+                const newPrice = (wholesalerProduct.retailerPrice && wholesalerProduct.retailerPrice > cleanCost)
+                    ? wholesalerProduct.retailerPrice
+                    : Math.ceil(markupPrice * vatMultiplier);
+                if (product.taxType !== correctTaxType || product.price !== newPrice) {
+                    yield prisma_1.default.product.update({
+                        where: { id: product.id },
+                        data: {
+                            taxType: correctTaxType,
+                            price: newPrice,
+                            costPrice: cleanCost
+                        }
+                    });
+                    results.push({
+                        name: product.name,
+                        taxType: `${product.taxType} -> ${correctTaxType}`,
+                        price: `${product.price} -> ${newPrice} RWF`,
+                        costPrice: cleanCost
+                    });
+                }
+            }
+        }
+        // Correct past invoices that have volume instead of value stored
+        const pastInvoices = yield prisma_1.default.customProfitInvoice.findMany({
+            where: {
+                rewardsGivenAmt: { gt: 0, lt: 10 }
+            }
+        });
+        for (const inv of pastInvoices) {
+            const systemConfig = yield prisma_1.default.systemConfig.findFirst();
+            const gasPrice = (systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.gasPricePerM3) || 6500;
+            const correctRewardsVal = Math.round(inv.rewardsGivenAmt * gasPrice);
+            const newTotalExpense = inv.rentExpense + inv.salariesExpense + inv.otherExpense + correctRewardsVal;
+            const newNetProfit = Math.max(0, inv.grossProfit - newTotalExpense - inv.tax);
+            const newRecipientShare = Math.round(newNetProfit * (inv.recipientSharePct / 100) * 100) / 100;
+            const newCompanyShare = Math.round(newNetProfit * (inv.companySharePct / 100) * 100) / 100;
+            yield prisma_1.default.customProfitInvoice.update({
+                where: { id: inv.id },
+                data: {
+                    rewardsGivenAmt: correctRewardsVal,
+                    totalExpense: newTotalExpense,
+                    netProfit: newNetProfit,
+                    recipientShareAmt: newRecipientShare,
+                    companyShareAmt: newCompanyShare,
+                    finalPayable: newRecipientShare
+                }
+            });
+            results.push({
+                invoiceId: inv.id,
+                recipientName: inv.recipientName,
+                rewardsGivenAmt: `${inv.rewardsGivenAmt} -> ${correctRewardsVal} RWF`,
+                netProfit: `${inv.netProfit} -> ${newNetProfit} RWF`
+            });
+        }
+        res.json({ success: true, updated: results });
+    }
+    catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+}));
 // === GPRS METER DIAGNOSTIC TEST ===
 router.get('/gprs-test', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;

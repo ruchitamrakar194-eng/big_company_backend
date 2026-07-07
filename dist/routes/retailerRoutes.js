@@ -60,4 +60,9 @@ router.get('/settlement-invoices', retailerController_1.getSettlementInvoices);
 router.get('/settlement-invoices/:id', retailerController_1.getSettlementInvoice);
 router.get('/gas-rewards', retailerController_1.getGasRewardsGiven);
 router.get('/manual-payment/audit', retailerController_1.getPaymentAuditLogs);
+// Profit Invoices (Read-only - Admin generates these)
+router.get('/profit-invoices', retailerController_1.getMyProfitInvoices);
+// Retailer Loans & Repayments
+router.get('/loans', retailerController_1.getRetailerLoans);
+router.post('/loans/repay', retailerController_1.payRetailerLoan);
 exports.default = router;

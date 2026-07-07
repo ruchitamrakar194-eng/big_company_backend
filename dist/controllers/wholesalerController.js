@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateUniqueBarcode = exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailer = exports.getLinkedRetailers = exports.rejectLinkRequest = exports.approveLinkRequest = exports.getLinkRequests = exports.rejectCreditRequest = exports.approveCreditRequest = exports.getCreditRequests = exports.confirmDelivery = exports.shipOrder = exports.rejectOrder = exports.confirmOrder = exports.getOrderStats = exports.updateOrderStatus = exports.getOrder = exports.getRetailerOrders = exports.deleteProduct = exports.updatePrice = exports.updateStock = exports.updateProduct = exports.createProduct = exports.getCategories = exports.getInventoryStats = exports.getInventory = exports.getDashboardStats = void 0;
+exports.getMyProfitInvoices = exports.generateUniqueBarcode = exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailer = exports.getLinkedRetailers = exports.rejectLinkRequest = exports.approveLinkRequest = exports.getLinkRequests = exports.rejectCreditRequest = exports.approveCreditRequest = exports.getCreditRequests = exports.confirmDelivery = exports.shipOrder = exports.rejectOrder = exports.confirmOrder = exports.getOrderStats = exports.updateOrderStatus = exports.getOrder = exports.getRetailerOrders = exports.deleteProduct = exports.updatePrice = exports.updateStock = exports.updateProduct = exports.createProduct = exports.getCategories = exports.getInventoryStats = exports.getInventory = exports.getDashboardStats = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const cloudinary_1 = require("../utils/cloudinary");
 const email_queue_1 = require("../queues/email.queue");
@@ -442,9 +442,6 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         // Parse stock
         let parsedStock = stock ? parseFloat(stock) : 0;
-        if (parsedConversion && parsedConversion > 0 && req.body.stockInPurchaseUnits) {
-            parsedStock = parsedStock * parsedConversion;
-        }
         if (stock && (isNaN(parsedStock) || parsedStock < 0)) {
             console.error('❌ Invalid stock:', stock);
             return res.status(400).json({
@@ -1779,3 +1776,25 @@ const generateUniqueBarcode = (req, res) => __awaiter(void 0, void 0, void 0, fu
     }
 });
 exports.generateUniqueBarcode = generateUniqueBarcode;
+// ==========================================
+// PROFIT INVOICES (Wholesaler - Read Only)
+// ==========================================
+const getMyProfitInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const wholesalerProfile = yield prisma_1.default.wholesalerProfile.findUnique({
+            where: { userId: req.user.id }
+        });
+        if (!wholesalerProfile) {
+            return res.status(404).json({ error: 'Wholesaler profile not found' });
+        }
+        const invoices = yield prisma_1.default.customProfitInvoice.findMany({
+            where: { wholesalerId: wholesalerProfile.id },
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json({ success: true, data: invoices });
+    }
+    catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.getMyProfitInvoices = getMyProfitInvoices;

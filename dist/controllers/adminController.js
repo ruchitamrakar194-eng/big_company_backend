@@ -46,7 +46,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getRetailerWholesalerLinkage = exports.getWholesalerAccountDetails = exports.getWorkerAccountDetails = exports.getRetailerAccountDetails = exports.getCustomerAccountDetails = exports.updateSystemConfig = exports.getSystemConfig = exports.getRevenueReport = exports.getTransactionReport = exports.unlinkNFCCard = exports.activateNFCCard = exports.blockNFCCard = exports.getNFCCardTransactions = exports.registerNFCCard = exports.rejectLoan = exports.approveLoan = exports.deleteEmployee = exports.updateEmployee = exports.createEmployee = exports.getEmployees = exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProducts = exports.deleteCustomer = exports.updateCustomerStatus = exports.updateCustomer = exports.updateWholesalerStatus = exports.updateRetailerStatus = exports.deleteWholesaler = exports.updateWholesaler = exports.verifyWholesaler = exports.verifyRetailer = exports.deleteRetailer = exports.updateRetailer = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getCategories = exports.getNFCCards = exports.getLoans = exports.createWholesaler = exports.getWholesalers = exports.createRetailer = exports.getRetailers = exports.createCustomer = exports.getCustomer = exports.getCustomers = exports.getReports = exports.getDashboard = void 0;
-exports.getCustomerCreditLimit = exports.updateCustomerCreditLimit = exports.acknowledgeAlert = exports.getSystemAlerts = exports.updateEmailEvent = exports.getEmailEvents = exports.sendManualEmail = exports.deleteEmailTemplate = exports.saveEmailTemplate = exports.getEmailTemplates = exports.resendEmail = exports.getEmailLogs = exports.confirmWholesaleDelivery = exports.deleteSettlementInvoice = exports.updateSettlementInvoice = exports.getSettlementInvoice = exports.createSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailerFromWholesaler = exports.linkRetailerToWholesaler = void 0;
+exports.getProfitInvoiceStats = exports.getProfitInvoiceRecipients = exports.generateAdminProfitInvoice = exports.getAdminProfitInvoices = exports.processRefundRequest = exports.getRefundRequests = exports.getCustomerCreditLimit = exports.updateCustomerCreditLimit = exports.acknowledgeAlert = exports.getSystemAlerts = exports.updateEmailEvent = exports.getEmailEvents = exports.sendManualEmail = exports.deleteEmailTemplate = exports.saveEmailTemplate = exports.getEmailTemplates = exports.resendEmail = exports.getEmailLogs = exports.confirmWholesaleDelivery = exports.deleteSettlementInvoice = exports.updateSettlementInvoice = exports.getSettlementInvoice = exports.createSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailerFromWholesaler = exports.linkRetailerToWholesaler = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const cloudinary_1 = require("../utils/cloudinary");
 const auth_1 = require("../utils/auth");
@@ -67,10 +67,10 @@ const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const todayStart = new Date(now);
         todayStart.setHours(0, 0, 0, 0);
         // 1. Customers
-        const customerTotal = yield prisma_1.default.consumerProfile.count({ where: { user: { role: 'consumer' } } });
-        const customerLast24h = yield prisma_1.default.consumerProfile.count({ where: { user: { role: 'consumer', createdAt: { gte: last24h } } } });
-        const customerLast7d = yield prisma_1.default.consumerProfile.count({ where: { user: { role: 'consumer', createdAt: { gte: last7d } } } });
-        const customerLast30d = yield prisma_1.default.consumerProfile.count({ where: { user: { role: 'consumer', createdAt: { gte: last30d } } } });
+        const customerTotal = yield prisma_1.default.consumerProfile.count();
+        const customerLast24h = yield prisma_1.default.consumerProfile.count({ where: { user: { createdAt: { gte: last24h } } } });
+        const customerLast7d = yield prisma_1.default.consumerProfile.count({ where: { user: { createdAt: { gte: last7d } } } });
+        const customerLast30d = yield prisma_1.default.consumerProfile.count({ where: { user: { createdAt: { gte: last30d } } } });
         // 2. Orders & Revenue (Combine B2C Sales and B2B Wholesaler Orders)
         const [sales, wholesaleOrders] = yield Promise.all([
             prisma_1.default.sale.findMany(),
@@ -425,11 +425,6 @@ exports.getReports = getReports;
 const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const customers = yield prisma_1.default.consumerProfile.findMany({
-            where: {
-                user: {
-                    role: 'consumer'
-                }
-            },
             include: {
                 user: true,
                 wallets: true,
@@ -733,16 +728,15 @@ const createWholesaler = (req, res) => __awaiter(void 0, void 0, void 0, functio
 exports.createWholesaler = createWholesaler;
 // Get loans
 const getLoans = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
-        // Read live interest rates safely
-        let rates = { customerInterestRate: 10, retailerInterestRate: 5, wholesalerInterestRate: 8 };
-        try {
-            const p = path_1.default.join(__dirname, '..', 'customRates.json');
-            if (fs_1.default.existsSync(p)) {
-                rates = Object.assign(Object.assign({}, rates), JSON.parse(fs_1.default.readFileSync(p, 'utf8')));
-            }
-        }
-        catch (e) { }
+        // Fetch live interest rates from SystemConfig
+        const config = yield prisma_1.default.systemConfig.findFirst();
+        const rates = {
+            customerInterestRate: (_a = config === null || config === void 0 ? void 0 : config.customerLoanInterest) !== null && _a !== void 0 ? _a : 10,
+            retailerInterestRate: (_b = config === null || config === void 0 ? void 0 : config.retailerLoanInterest) !== null && _b !== void 0 ? _b : 0,
+            wholesalerInterestRate: (_c = config === null || config === void 0 ? void 0 : config.wholesalerLoanInterest) !== null && _c !== void 0 ? _c : 8
+        };
         // 1. Fetch Consumer Loans
         const consumerLoansRaw = yield prisma_1.default.loan.findMany({
             include: {
@@ -814,7 +808,7 @@ const getLoans = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         });
         const retailerLoans = creditRequestsRaw.map((cr) => {
             var _a, _b, _c, _d, _e;
-            const rate = Number(rates.retailerInterestRate) || 5;
+            const rate = Number(rates.retailerInterestRate) || 0;
             const interestAmount = Math.round(cr.amount * (rate / 100));
             const totalRepayable = cr.amount + interestAmount;
             let st = cr.status;
@@ -1360,21 +1354,23 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(404).json({ error: 'Customer not found' });
         // Check if email/phone is taken by ANOTHER user
         if (email || phone) {
-            const existingUser = yield prisma_1.default.user.findFirst({
-                where: {
-                    AND: [
-                        { id: { not: profile.userId } }, // Exclude current user
-                        {
-                            OR: [
-                                email ? { email } : {},
-                                phone ? { phone } : {}
-                            ]
-                        }
-                    ]
+            const orConditions = [];
+            if (email)
+                orConditions.push({ email });
+            if (phone)
+                orConditions.push({ phone });
+            if (orConditions.length > 0) {
+                const existingUser = yield prisma_1.default.user.findFirst({
+                    where: {
+                        AND: [
+                            { id: { not: profile.userId } }, // Exclude current user
+                            { OR: orConditions }
+                        ]
+                    }
+                });
+                if (existingUser) {
+                    return res.status(400).json({ error: 'Email or phone already in use by another user' });
                 }
-            });
-            if (existingUser) {
-                return res.status(400).json({ error: 'Email or phone already in use by another user' });
             }
         }
         yield prisma_1.default.user.update({
@@ -1497,6 +1493,10 @@ const deleteCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             prisma_1.default.nfcCard.updateMany({
                 where: { consumerId: Number(id) },
                 data: { consumerId: null, status: 'inactive' }
+            }),
+            // 7.5 Delete Sale Items
+            prisma_1.default.saleItem.deleteMany({
+                where: { sale: { consumerId: Number(id) } }
             }),
             // 8. Delete Sales (if they belong to this consumer)
             prisma_1.default.sale.deleteMany({ where: { consumerId: Number(id) } }),
@@ -2279,23 +2279,24 @@ const getSystemConfig = (req, res) => __awaiter(void 0, void 0, void 0, function
         let config = yield prisma_1.default.systemConfig.findFirst();
         // Create default config if it doesn't exist
         if (!config) {
+            const defaultData = {
+                retailerShare: 60,
+                companyShare: 28,
+                gasRewardShare: 12,
+                gasPricePerM3: 850,
+                minGasTopup: 500,
+                maxGasTopup: 100000,
+                minWalletTopup: 500,
+                maxWalletTopup: 500000,
+                maxDailyTransaction: 1000000,
+                maxCreditLimit: 500000,
+                wholesalerMarkup: 20,
+                retailerMarkup: 20,
+                maxDiscountPercentage: 5,
+                exciseDutyRate: 10
+            };
             config = yield prisma_1.default.systemConfig.create({
-                data: {
-                    retailerShare: 60,
-                    companyShare: 28,
-                    gasRewardShare: 12,
-                    gasPricePerM3: 850,
-                    minGasTopup: 500,
-                    maxGasTopup: 100000,
-                    minWalletTopup: 500,
-                    maxWalletTopup: 500000,
-                    maxDailyTransaction: 1000000,
-                    maxCreditLimit: 500000,
-                    wholesalerMarkup: 20,
-                    retailerMarkup: 20,
-                    maxDiscountPercentage: 5,
-                    exciseDutyRate: 10
-                }
+                data: defaultData
             });
         }
         const rates = getCustomRates();
@@ -2322,11 +2323,12 @@ const recalculateAllProductsBackground = (config) => __awaiter(void 0, void 0, v
         console.log(`📦 Found ${products.length} products to recalculate. Using Markups: W=${wholesalerMarkupPct}%, R=${retailerMarkupPct}%`);
         let updatedCount = 0;
         for (const product of products) {
-            if (product.supplierCost === null || product.supplierCost === undefined)
+            const prodAny = product;
+            if (prodAny.supplierCost === null || prodAny.supplierCost === undefined)
                 continue;
-            const taxType = product.taxType || 'B';
+            const taxType = prodAny.taxType || 'B';
             // 1. Calculate Wholesaler Price
-            const wholesalePricing = (0, pricingUtils_1.calculateWholesalePrice)(product.supplierCost, wholesalerMarkupPct, taxType, exciseDutyRatePct);
+            const wholesalePricing = (0, pricingUtils_1.calculateWholesalePrice)(prodAny.supplierCost, wholesalerMarkupPct, taxType, exciseDutyRatePct);
             // 2. Calculate Retailer Price (using the wholesaler's pre-tax price as the retailer's clean base cost)
             const retailPricing = (0, pricingUtils_1.calculateRetailPrice)(wholesalePricing.preTaxPrice, retailerMarkupPct, taxType, exciseDutyRatePct);
             // 3. Update Product
@@ -2351,9 +2353,10 @@ const recalculateAllProductsBackground = (config) => __awaiter(void 0, void 0, v
         console.log(`📦 Found ${retailerProducts.length} retailer products to recalculate. Using Markup: R=${retailerMarkupPct}%`);
         let retailUpdatedCount = 0;
         for (const rProduct of retailerProducts) {
+            const rProdAny = rProduct;
             if (rProduct.costPrice === null || rProduct.costPrice === undefined)
                 continue;
-            const taxType = rProduct.taxType || 'B';
+            const taxType = rProdAny.taxType || 'B';
             const retailPricing = (0, pricingUtils_1.calculateRetailPrice)(rProduct.costPrice, retailerMarkupPct, taxType, exciseDutyRatePct);
             yield prisma_1.default.product.update({
                 where: { id: rProduct.id },
@@ -2386,10 +2389,13 @@ const updateSystemConfig = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 data
             });
         }
-        // Fire and forget background recalculation
-        recalculateAllProductsBackground(config).catch(err => {
+        // Await background recalculation so that subsequent navigation shows updated prices immediately
+        try {
+            yield recalculateAllProductsBackground(config);
+        }
+        catch (err) {
             console.error('❌ Error triggering recalculation:', err);
-        });
+        }
         const rates = getCustomRates();
         res.json({ success: true, config: Object.assign(Object.assign({}, config), rates) });
     }
@@ -2439,9 +2445,6 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
                     orderBy: { createdAt: 'desc' },
                     take: 50,
                     include: {
-                        retailerProfile: {
-                            select: { shopName: true, id: true }
-                        },
                         saleItems: {
                             include: {
                                 product: true
@@ -2466,13 +2469,21 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
             creditWallet: ((_c = customer.wallets.find(w => w.type === 'credit_wallet')) === null || _c === void 0 ? void 0 : _c.balance) || 0,
             gasBalance: customer.gasMeters.reduce((sum, m) => sum + (m.currentUnits || 0), 0)
         };
+        // Fix: Manually fetch retailer profiles to avoid Prisma crashing on missing required relation
+        const retailerIds = [...new Set(customer.sales.map(s => s.retailerId))];
+        const retailers = yield prisma_1.default.retailerProfile.findMany({
+            where: { id: { in: retailerIds } },
+            select: { id: true, shopName: true }
+        });
+        const retailerMap = new Map(retailers.map(r => [r.id, r]));
+        const ordersWithRetailers = customer.sales.map(s => (Object.assign(Object.assign({}, s), { retailerProfile: retailerMap.get(s.retailerId) || { id: s.retailerId, shopName: 'Unknown Retailer' } })));
         // Order statistics
         const orderStats = {
-            pending: customer.sales.filter(s => s.status === 'pending').length,
-            active: customer.sales.filter(s => s.status === 'processing' || s.status === 'active').length,
-            completed: customer.sales.filter(s => s.status === 'completed' || s.status === 'delivered').length,
-            cancelled: customer.sales.filter(s => s.status === 'cancelled').length,
-            total: customer.sales.length
+            pending: ordersWithRetailers.filter(s => s.status === 'pending').length,
+            active: ordersWithRetailers.filter(s => s.status === 'processing' || s.status === 'active').length,
+            completed: ordersWithRetailers.filter(s => s.status === 'completed' || s.status === 'delivered').length,
+            cancelled: ordersWithRetailers.filter(s => s.status === 'cancelled').length,
+            total: ordersWithRetailers.length
         };
         // Get all transactions from all wallets
         const allTransactions = customer.wallets.flatMap(w => w.walletTransactions.map(t => (Object.assign(Object.assign({}, t), { walletType: w.type })))).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -2484,9 +2495,9 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
             totalRewards: customer.gasRewards.reduce((sum, r) => sum + r.units, 0)
         };
         // Last order details
-        const lastOrder = customer.sales.length > 0 ? customer.sales[0] : null;
+        const lastOrder = ordersWithRetailers.length > 0 ? ordersWithRetailers[0] : null;
         // Supplier chain - find linked retailers from sales
-        const linkedRetailers = Array.from(new Set(customer.sales.map(s => { var _a; return (_a = s.retailerProfile) === null || _a === void 0 ? void 0 : _a.id; }).filter(Boolean)));
+        const linkedRetailers = Array.from(new Set(ordersWithRetailers.map(s => { var _a; return (_a = s.retailerProfile) === null || _a === void 0 ? void 0 : _a.id; }).filter(Boolean)));
         const supplierChain = yield prisma_1.default.retailerProfile.findMany({
             where: { id: { in: linkedRetailers } },
             include: {
@@ -2517,7 +2528,7 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
                     currency: w.currency
                 })),
                 orderStats,
-                orders: customer.sales,
+                orders: ordersWithRetailers,
                 transactionHistory: allTransactions,
                 nfcCards: customer.nfcCards.map(card => ({
                     id: card.id,
@@ -3198,9 +3209,10 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
             });
             // Fetch SystemConfig for Retailer Inheritance Pipeline
             const config = yield prisma_1.default.systemConfig.findFirst();
-            const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
-            const retailerMarkupPct = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
-            const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
+            const configAny = config;
+            const wholesalerMarkupPct = (configAny === null || configAny === void 0 ? void 0 : configAny.wholesalerMarkup) || 20;
+            const retailerMarkupPct = (configAny === null || configAny === void 0 ? void 0 : configAny.retailerMarkup) || 20;
+            const exciseDutyRatePct = (configAny === null || configAny === void 0 ? void 0 : configAny.exciseDutyRate) || 10;
             const { calculateRetailPrice } = yield Promise.resolve().then(() => __importStar(require('../utils/pricingUtils')));
             // 2. Update Retailer's Inventory
             for (const item of updatedOrder.orderItems) {
@@ -3232,9 +3244,10 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
                 else {
                     // Create new product for retailer based on wholesaler's product
                     // Retailer Inheritance Pipeline
-                    const supplierCost = item.product.supplierCost || item.product.costPrice || 0;
+                    const prodAny = item.product;
+                    const supplierCost = prodAny.supplierCost || item.product.costPrice || 0;
                     const cleanBaseCost = supplierCost * (1 + wholesalerMarkupPct / 100);
-                    const taxType = item.product.taxType || 'B';
+                    const taxType = prodAny.taxType || 'B';
                     const retailPricing = calculateRetailPrice(cleanBaseCost, retailerMarkupPct, taxType, exciseDutyRatePct);
                     const conversionFactor = item.product.conversionFactor ? Number(item.product.conversionFactor) : null;
                     let addStock = item.quantity;
@@ -3596,3 +3609,253 @@ const getCustomerCreditLimit = (req, res) => __awaiter(void 0, void 0, void 0, f
     }
 });
 exports.getCustomerCreditLimit = getCustomerCreditLimit;
+// Refund Requests
+const getRefundRequests = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const refundRequests = yield prisma_1.default.walletTransaction.findMany({
+            where: {
+                type: 'refund'
+            },
+            include: {
+                wallet: {
+                    include: {
+                        consumerProfile: {
+                            include: { user: true }
+                        }
+                    }
+                }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json({ success: true, data: refundRequests });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.getRefundRequests = getRefundRequests;
+const processRefundRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const { action, reason } = req.body; // action: 'approve' or 'reject'
+        if (!['approve', 'reject'].includes(action)) {
+            return res.status(400).json({ success: false, error: 'Invalid action' });
+        }
+        const transaction = yield prisma_1.default.walletTransaction.findUnique({
+            where: { id: Number(id) },
+            include: { wallet: { include: { consumerProfile: true } } }
+        });
+        if (!transaction) {
+            return res.status(404).json({ success: false, error: 'Refund request not found' });
+        }
+        if (transaction.status !== 'pending') {
+            return res.status(400).json({ success: false, error: 'Request is already processed' });
+        }
+        yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            const newStatus = action === 'approve' ? 'approved' : 'rejected';
+            // Update transaction status
+            yield tx.walletTransaction.update({
+                where: { id: transaction.id },
+                data: {
+                    status: newStatus,
+                    description: reason ? `${transaction.description} - ${reason}` : transaction.description
+                }
+            });
+            // If approved, deduct from wallet
+            if (action === 'approve' && transaction.walletId) {
+                const currentWallet = yield tx.wallet.findUnique({
+                    where: { id: transaction.walletId }
+                });
+                if (currentWallet && currentWallet.balance < transaction.amount) {
+                    throw new Error('Customer wallet has insufficient balance for this refund');
+                }
+                yield tx.wallet.update({
+                    where: { id: transaction.walletId },
+                    data: {
+                        balance: { decrement: transaction.amount }
+                    }
+                });
+                if (transaction.wallet && transaction.wallet.consumerId) {
+                    const profileWalletCount = yield tx.wallet.findFirst({
+                        where: { id: transaction.walletId, type: 'dashboard_wallet' }
+                    });
+                    if (profileWalletCount) {
+                        yield tx.consumerProfile.update({
+                            where: { id: transaction.wallet.consumerId },
+                            data: { walletBalance: { decrement: transaction.amount } }
+                        });
+                    }
+                }
+            }
+        }));
+        res.json({ success: true, message: `Refund request ${action}d successfully` });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.processRefundRequest = processRefundRequest;
+// ==========================================
+// PROFIT INVOICES (Admin)
+// ==========================================
+const getAdminProfitInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const invoices = yield prisma_1.default.customProfitInvoice.findMany({
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json({ success: true, data: invoices });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.getAdminProfitInvoices = getAdminProfitInvoices;
+const generateAdminProfitInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { recipientType, recipientId, recipientName, totalRevenue, grossProfit, tax, netProfit, recipientSharePct, recipientShareAmt, companySharePct, companyShareAmt, rewardsPoolPct, rewardsPoolAmt, rewardsGivenAmt, rentExpense, salariesExpense, otherExpense, totalExpense, finalPayable } = req.body;
+        if (!recipientType || !recipientId) {
+            return res.status(400).json({ success: false, error: 'Recipient Type and ID are required' });
+        }
+        const data = {
+            recipientType,
+            recipientName,
+            totalRevenue: Number(totalRevenue) || 0,
+            grossProfit: Number(grossProfit) || 0,
+            tax: Number(tax) || 0,
+            netProfit: Number(netProfit) || 0,
+            recipientSharePct: Number(recipientSharePct) || 0,
+            recipientShareAmt: Number(recipientShareAmt) || 0,
+            companySharePct: Number(companySharePct) || 0,
+            companyShareAmt: Number(companyShareAmt) || 0,
+            rewardsPoolPct: Number(rewardsPoolPct) || 0,
+            rewardsPoolAmt: Number(rewardsPoolAmt) || 0,
+            rewardsGivenAmt: Number(rewardsGivenAmt) || 0,
+            rentExpense: Number(rentExpense) || 0,
+            salariesExpense: Number(salariesExpense) || 0,
+            otherExpense: Number(otherExpense) || 0,
+            totalExpense: Number(totalExpense) || 0,
+            finalPayable: Number(finalPayable) || 0
+        };
+        if (recipientType === 'Retailer') {
+            data.retailerId = Number(recipientId);
+        }
+        else {
+            data.wholesalerId = Number(recipientId);
+        }
+        const newInvoice = yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            const invoice = yield tx.customProfitInvoice.create({ data });
+            // Reset stats (by updating lastSettlementDate)
+            const now = new Date();
+            if (recipientType === 'Retailer') {
+                yield tx.retailerProfile.update({
+                    where: { id: Number(recipientId) },
+                    data: { lastSettlementDate: now }
+                });
+            }
+            else {
+                yield tx.wholesalerProfile.update({
+                    where: { id: Number(recipientId) },
+                    data: { lastSettlementDate: now }
+                });
+            }
+            return invoice;
+        }));
+        res.json({ success: true, message: 'Profit invoice generated successfully', data: newInvoice });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.generateAdminProfitInvoice = generateAdminProfitInvoice;
+const getProfitInvoiceRecipients = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const retailers = yield prisma_1.default.retailerProfile.findMany({
+            where: { isVerified: true },
+            select: { id: true, shopName: true }
+        });
+        const wholesalers = yield prisma_1.default.wholesalerProfile.findMany({
+            where: { isVerified: true },
+            select: { id: true, companyName: true }
+        });
+        const formattedRetailers = retailers.map(r => ({ id: r.id, name: r.shopName, type: 'Retailer' }));
+        const formattedWholesalers = wholesalers.map(w => ({ id: w.id, name: w.companyName, type: 'Wholesaler' }));
+        res.json({ success: true, data: [...formattedRetailers, ...formattedWholesalers] });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.getProfitInvoiceRecipients = getProfitInvoiceRecipients;
+const getProfitInvoiceStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { type, id } = req.params;
+        let totalRevenue = 0;
+        let totalCost = 0;
+        let gasRewardsGiven = 0;
+        if (type === 'Retailer') {
+            const retailer = yield prisma_1.default.retailerProfile.findUnique({ where: { id: Number(id) } });
+            if (!retailer)
+                return res.status(404).json({ success: false, error: 'Retailer not found' });
+            const dateFilter = retailer.lastSettlementDate ? { gte: retailer.lastSettlementDate } : undefined;
+            const sales = yield prisma_1.default.sale.findMany({
+                where: Object.assign({ retailerId: Number(id), status: { not: 'cancelled' } }, (dateFilter ? { createdAt: dateFilter } : {})),
+                include: { saleItems: { include: { product: true } } }
+            });
+            for (const sale of sales) {
+                for (const item of sale.saleItems) {
+                    totalRevenue += (item.price * item.quantity);
+                    totalCost += ((item.product.costPrice || 0) * item.quantity);
+                }
+            }
+            const [rewards, systemConfig] = yield Promise.all([
+                prisma_1.default.gasReward.aggregate({
+                    where: Object.assign({ sale: { retailerId: Number(id) } }, (dateFilter ? { createdAt: dateFilter } : {})),
+                    _sum: { units: true }
+                }),
+                prisma_1.default.systemConfig.findFirst()
+            ]);
+            const gasUnits = rewards._sum.units || 0;
+            const gasPrice = (systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.gasPricePerM3) || 6500;
+            gasRewardsGiven = Math.round(gasUnits * gasPrice);
+            res.json({
+                success: true,
+                data: {
+                    totalRevenue,
+                    grossProfit: totalRevenue - totalCost,
+                    gasRewardsGiven
+                }
+            });
+        }
+        else if (type === 'Wholesaler') {
+            const wholesaler = yield prisma_1.default.wholesalerProfile.findUnique({ where: { id: Number(id) } });
+            if (!wholesaler)
+                return res.status(404).json({ success: false, error: 'Wholesaler not found' });
+            const dateFilter = wholesaler.lastSettlementDate ? { gte: wholesaler.lastSettlementDate } : undefined;
+            const orders = yield prisma_1.default.order.findMany({
+                where: Object.assign({ wholesalerId: Number(id), status: { in: ['delivered', 'completed'] } }, (dateFilter ? { createdAt: dateFilter } : {})),
+                include: { orderItems: { include: { product: true } } }
+            });
+            for (const order of orders) {
+                for (const item of order.orderItems) {
+                    totalRevenue += (item.price * item.quantity);
+                    totalCost += ((item.product.costPrice || 0) * item.quantity);
+                }
+            }
+            res.json({
+                success: true,
+                data: {
+                    totalRevenue,
+                    grossProfit: totalRevenue - totalCost,
+                    gasRewardsGiven: 0
+                }
+            });
+        }
+        else {
+            res.status(400).json({ success: false, error: 'Invalid type' });
+        }
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.getProfitInvoiceStats = getProfitInvoiceStats;

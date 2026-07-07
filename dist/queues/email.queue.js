@@ -54,6 +54,7 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 console.log(`[Queue] Connecting to Redis at: ${redisUrl.includes('@') ? redisUrl.split('@')[1] : redisUrl}`);
 const connection = new ioredis_1.default(redisUrl, {
     maxRetriesPerRequest: null,
+    family: 4, // Force IPv4 to fix Railway ETIMEDOUT issues
     // Automatically enable TLS if rediss:// protocol is used
     tls: redisUrl.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
 });
@@ -133,8 +134,17 @@ exports.emailWorker = new bullmq_1.Worker('email-queue', (job) => __awaiter(void
                     plainText = `BIG Ltd: A system notification was triggered for your account at ${new Date().toLocaleString()}. Please contact support if you need assistance.`;
                 }
             }
-            console.log(`[EmailWorker] Sending SMS to ${to}: ${plainText.substring(0, 80)}...`);
-            const result = yield SMSService.sendSMS(to, plainText, templateType, relatedEntity, logId // Pass existing logId for retries
+            // Resolve phone number if `to` is an email address
+            let finalToSMS = to;
+            if (finalToSMS && finalToSMS.includes('@') && (relatedEntity === null || relatedEntity === void 0 ? void 0 : relatedEntity.type) === 'USER' && (relatedEntity === null || relatedEntity === void 0 ? void 0 : relatedEntity.id)) {
+                const user = yield prisma_1.default.user.findUnique({ where: { id: Number(relatedEntity.id) } });
+                if (user === null || user === void 0 ? void 0 : user.phone) {
+                    finalToSMS = user.phone;
+                    console.log(`[EmailWorker] Resolved email to phone: ${finalToSMS}`);
+                }
+            }
+            console.log(`[EmailWorker] Sending SMS to ${finalToSMS}: ${plainText.substring(0, 80)}...`);
+            const result = yield SMSService.sendSMS(finalToSMS, plainText, templateType, relatedEntity, logId // Pass existing logId for retries
             );
             // If this was the first attempt, save the logId to job data for future retries
             if (!logId && result.logId) {
@@ -142,8 +152,17 @@ exports.emailWorker = new bullmq_1.Worker('email-queue', (job) => __awaiter(void
             }
         }
         else {
+            // Resolve email address if `to` is a phone number
+            let finalTo = to;
+            if (finalTo && !finalTo.includes('@') && (relatedEntity === null || relatedEntity === void 0 ? void 0 : relatedEntity.type) === 'USER' && (relatedEntity === null || relatedEntity === void 0 ? void 0 : relatedEntity.id)) {
+                const user = yield prisma_1.default.user.findUnique({ where: { id: Number(relatedEntity.id) } });
+                if (user === null || user === void 0 ? void 0 : user.email) {
+                    finalTo = user.email;
+                    console.log(`[EmailWorker] Resolved phone to email: ${finalTo}`);
+                }
+            }
             // Send the email and pass the logId to track retries on the same record
-            const result = yield email_service_1.EmailService.sendEmail(to, finalSubject, finalHtml, templateType || 'MANUAL_EMAIL', relatedEntity, logId);
+            const result = yield email_service_1.EmailService.sendEmail(finalTo, finalSubject, finalHtml, templateType || 'MANUAL_EMAIL', relatedEntity, logId);
             // If this was the first attempt, save the logId to job data for future retries
             if (!logId && result.logId) {
                 yield job.updateData(Object.assign(Object.assign({}, job.data), { logId: result.logId }));

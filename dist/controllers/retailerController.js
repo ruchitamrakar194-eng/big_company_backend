@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCategories = exports.getPaymentAuditLogs = exports.getGasRewardsGiven = exports.confirmPurchaseOrderDelivery = exports.getPurchaseOrder = exports.getPurchaseOrders = exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkCustomer = exports.getLinkedCustomers = exports.rejectCustomerLinkRequest = exports.approveCustomerLinkRequest = exports.getCustomerLinkRequests = exports.linkCardForCustomer = exports.cancelLinkRequest = exports.getMyLinkRequests = exports.sendLinkRequest = exports.getAvailableWholesalers = exports.getAnalytics = exports.topUpWallet = exports.updateProfile = exports.getProfile = exports.payCredit = exports.makeRepayment = exports.requestCredit = exports.getCreditOrder = exports.getCreditOrders = exports.getCreditInfo = exports.getWalletTransactions = exports.createOrder = exports.getWholesalerProducts = exports.getDailySales = exports.fulfillSale = exports.cancelSale = exports.updateSaleStatus = exports.createSale = exports.scanBarcode = exports.getPOSProducts = exports.getWallet = exports.createBranch = exports.getBranches = exports.getOrder = exports.getOrders = exports.updateProduct = exports.createProduct = exports.getInventory = exports.getDashboardStats = void 0;
+exports.payRetailerLoan = exports.getRetailerLoans = exports.getMyProfitInvoices = exports.getCategories = exports.getPaymentAuditLogs = exports.getGasRewardsGiven = exports.confirmPurchaseOrderDelivery = exports.getPurchaseOrder = exports.getPurchaseOrders = exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkCustomer = exports.getLinkedCustomers = exports.rejectCustomerLinkRequest = exports.approveCustomerLinkRequest = exports.getCustomerLinkRequests = exports.linkCardForCustomer = exports.cancelLinkRequest = exports.getMyLinkRequests = exports.sendLinkRequest = exports.getAvailableWholesalers = exports.getAnalytics = exports.topUpWallet = exports.updateProfile = exports.getProfile = exports.payCredit = exports.makeRepayment = exports.requestCredit = exports.getCreditOrder = exports.getCreditOrders = exports.getCreditInfo = exports.getWalletTransactions = exports.createOrder = exports.getWholesalerProducts = exports.getDailySales = exports.fulfillSale = exports.cancelSale = exports.updateSaleStatus = exports.createSale = exports.scanBarcode = exports.getPOSProducts = exports.getWallet = exports.createBranch = exports.getBranches = exports.getOrder = exports.getOrders = exports.updateProduct = exports.createProduct = exports.getInventory = exports.getDashboardStats = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const cloudinary_1 = require("../utils/cloudinary");
 const email_queue_1 = require("../queues/email.queue");
@@ -72,6 +72,8 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const startOfWeek = new Date(today);
         startOfWeek.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1)); // Monday
         startOfWeek.setHours(0, 0, 0, 0);
+        const settlementDate = retailerProfile.lastSettlementDate;
+        const dateFilter = settlementDate ? { gte: settlementDate } : undefined;
         // Fetch data in parallel
         const [todaySales, allSales, inventory, pendingOrders, gasRewardsAggregate, systemConfig] = yield Promise.all([
             // Today's Sales
@@ -84,7 +86,7 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }),
             // All Sales (for revenue stats)
             prisma_1.default.sale.findMany({
-                where: { retailerId: retailerProfile.id }
+                where: Object.assign({ retailerId: retailerProfile.id }, (dateFilter ? { createdAt: dateFilter } : {}))
             }),
             prisma_1.default.product.findMany({
                 where: { retailerId: retailerProfile.id, wholesalerId: null }
@@ -98,11 +100,9 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }),
             // Gas Rewards given
             prisma_1.default.gasReward.aggregate({
-                where: {
-                    sale: {
+                where: Object.assign({ sale: {
                         retailerId: retailerProfile.id
-                    }
-                },
+                    } }, (dateFilter ? { createdAt: dateFilter } : {})),
                 _sum: {
                     units: true
                 }
@@ -112,10 +112,7 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         // Calculate Stats
         // DYNAMIC PROFIT CALCULATION (Realized form Sales)
         const sales = yield prisma_1.default.sale.findMany({
-            where: {
-                retailerId: retailerProfile.id,
-                status: { not: 'cancelled' } // Exclude cancelled orders from revenue
-            },
+            where: Object.assign({ retailerId: retailerProfile.id, status: { not: 'cancelled' } }, (dateFilter ? { createdAt: dateFilter } : {})),
             include: {
                 saleItems: {
                     include: { product: true }
@@ -298,7 +295,10 @@ const getInventory = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             where: { retailerId: retailerProfile.id, wholesalerId: null },
             orderBy: { name: 'asc' }
         });
-        res.json({ products: myProducts });
+        const config = yield prisma_1.default.systemConfig.findFirst();
+        const retailerMarkupPct = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
+        const productsWithMargin = myProducts.map(p => (Object.assign(Object.assign({}, p), { profitMargin: retailerMarkupPct })));
+        res.json({ products: productsWithMargin });
     }
     catch (error) {
         res.status(500).json({ error: error.message });
@@ -380,9 +380,17 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     if (conversionFactor && conversionFactor > 0) {
                         addStock = item.quantity * conversionFactor;
                     }
+                    // Calculate/Recalculate final retail price: (cost + markup) + 18% VAT for Type B products
+                    const config = yield prisma_1.default.systemConfig.findFirst();
+                    const retailerMarkup = (config === null || config === void 0 ? void 0 : config.retailerMarkup) || 20;
+                    const invoiceMarkupPrice = cleanCost * (1 + retailerMarkup / 100);
+                    const invoiceVatMultiplier = taxType === 'B' ? 1.18 : 1;
+                    const invoiceFinalPrice = sourceProduct.retailerPrice || Math.ceil(invoiceMarkupPrice * invoiceVatMultiplier);
                     const updateData = {
                         stock: { increment: addStock },
                         costPrice: cleanCost,
+                        price: invoiceFinalPrice,
+                        taxType: taxType,
                         status: 'active',
                         barcode: sourceProduct.barcode // Ensure barcode is set/updated
                     };
@@ -422,6 +430,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                             baseUnit: sourceProduct.baseUnit,
                             purchaseUnit: sourceProduct.purchaseUnit,
                             conversionFactor: sourceProduct.conversionFactor,
+                            taxType: invoiceTaxType,
                             invoiceNumber: invoice_number,
                             retailerId: retailerProfile.id,
                             image: sourceProduct.image,
@@ -1935,30 +1944,13 @@ const requestCredit = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             });
         }
         // Check if there is an active outstanding loan
-        if (credit && credit.usedCredit > 0) {
+        const activeLoan = yield prisma_1.default.retailerLoan.findFirst({
+            where: { retailerId: retailerProfile.id, status: 'active' }
+        });
+        if (activeLoan) {
             return res.status(400).json({
                 error: 'You have an active outstanding loan. You must repay your current loan in full before requesting a new one.'
             });
-        }
-        // Single Active Credit Rule: check if there is an approved loan that has not yet been used
-        const latestApprovedRequest = yield prisma_1.default.creditRequest.findFirst({
-            where: { retailerId: retailerProfile.id, status: 'approved' },
-            orderBy: { updatedAt: 'desc' }
-        });
-        if (latestApprovedRequest) {
-            // Check if they placed any credit orders since this latest request was approved
-            const creditOrdersCount = yield prisma_1.default.order.count({
-                where: {
-                    retailerId: retailerProfile.id,
-                    paymentMethod: 'credit',
-                    createdAt: { gte: latestApprovedRequest.updatedAt || latestApprovedRequest.createdAt }
-                }
-            });
-            if (creditOrdersCount === 0) {
-                return res.status(400).json({
-                    error: 'You already have an active approved credit limit that has not been used yet.'
-                });
-            }
         }
         // Create CreditRequest
         const creditRequest = yield prisma_1.default.creditRequest.create({
@@ -2064,11 +2056,13 @@ const makeRepayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             // Update Credit Usage (if this was a credit order)
             const creditInfo = yield prisma.retailerCredit.findUnique({ where: { retailerId: retailerProfile.id } });
             if (creditInfo) {
+                const newUsedCredit = Math.max(0, creditInfo.usedCredit - amount);
+                const newAvailableCredit = Math.min(creditInfo.creditLimit, creditInfo.availableCredit + amount);
                 yield prisma.retailerCredit.update({
                     where: { retailerId: retailerProfile.id },
                     data: {
-                        usedCredit: { decrement: amount },
-                        availableCredit: { increment: amount }
+                        usedCredit: newUsedCredit,
+                        availableCredit: newAvailableCredit
                     }
                 });
             }
@@ -2136,11 +2130,13 @@ const payCredit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             // Update Credit Usage
             const creditInfo = yield tx.retailerCredit.findUnique({ where: { retailerId: retailerProfile.id } });
             if (creditInfo) {
+                const newUsedCredit = Math.max(0, creditInfo.usedCredit - amount);
+                const newAvailableCredit = Math.min(creditInfo.creditLimit, creditInfo.availableCredit + amount);
                 yield tx.retailerCredit.update({
                     where: { retailerId: retailerProfile.id },
                     data: {
-                        usedCredit: { decrement: amount },
-                        availableCredit: { increment: amount }
+                        usedCredit: newUsedCredit,
+                        availableCredit: newAvailableCredit
                     }
                 });
             }
@@ -3419,12 +3415,11 @@ const getGasRewardsGiven = (req, res) => __awaiter(void 0, void 0, void 0, funct
             return res.status(404).json({ error: 'Retailer profile not found' });
         }
         const { limit = '20', offset = '0' } = req.query;
+        const dateFilter = retailerProfile.lastSettlementDate ? { gte: retailerProfile.lastSettlementDate } : undefined;
         const rewards = yield prisma_1.default.gasReward.findMany({
-            where: {
-                sale: {
+            where: Object.assign({ sale: {
                     retailerId: retailerProfile.id
-                }
-            },
+                } }, (dateFilter ? { createdAt: dateFilter } : {})),
             include: {
                 consumerProfile: {
                     include: {
@@ -3442,20 +3437,16 @@ const getGasRewardsGiven = (req, res) => __awaiter(void 0, void 0, void 0, funct
             skip: parseInt(offset)
         });
         const total = yield prisma_1.default.gasReward.count({
-            where: {
-                sale: {
+            where: Object.assign({ sale: {
                     retailerId: retailerProfile.id
-                }
-            }
+                } }, (dateFilter ? { createdAt: dateFilter } : {}))
         });
         // Calculate total m3 and value
         const [aggregate, systemConfig] = yield Promise.all([
             prisma_1.default.gasReward.aggregate({
-                where: {
-                    sale: {
+                where: Object.assign({ sale: {
                         retailerId: retailerProfile.id
-                    }
-                },
+                    } }, (dateFilter ? { createdAt: dateFilter } : {})),
                 _sum: {
                     units: true
                 }
@@ -3581,3 +3572,172 @@ const getCategories = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.getCategories = getCategories;
+// ==========================================
+// PROFIT INVOICES (Retailer - Read Only)
+// ==========================================
+const getMyProfitInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
+            where: { userId: req.user.id }
+        });
+        if (!retailerProfile) {
+            return res.status(404).json({ error: 'Retailer profile not found' });
+        }
+        const invoices = yield prisma_1.default.customProfitInvoice.findMany({
+            where: { retailerId: retailerProfile.id },
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json({ success: true, data: invoices });
+    }
+    catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.getMyProfitInvoices = getMyProfitInvoices;
+// ==========================================
+// RETAILER LOANS & REPAYMENTS
+// ==========================================
+// Get all active/paid loans for retailer
+const getRetailerLoans = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
+            where: { userId: req.user.id }
+        });
+        if (!retailerProfile) {
+            return res.status(404).json({ error: 'Retailer profile not found' });
+        }
+        const loans = yield prisma_1.default.retailerLoan.findMany({
+            where: { retailerId: retailerProfile.id },
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json({ success: true, data: loans });
+    }
+    catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.getRetailerLoans = getRetailerLoans;
+// Repay a specific loan
+const payRetailerLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
+            where: { userId: req.user.id },
+            include: { user: true }
+        });
+        if (!retailerProfile) {
+            return res.status(404).json({ error: 'Retailer profile not found' });
+        }
+        const { loanId, amount, paymentMethod = 'wallet', phone } = req.body;
+        if (!loanId || !amount || amount <= 0) {
+            return res.status(400).json({ error: 'Invalid loan repayment parameters' });
+        }
+        const loan = yield prisma_1.default.retailerLoan.findUnique({
+            where: { id: Number(loanId) }
+        });
+        if (!loan || loan.retailerId !== retailerProfile.id) {
+            return res.status(404).json({ error: 'Loan not found or unauthorized' });
+        }
+        if (loan.status === 'paid') {
+            return res.status(400).json({ error: 'Loan is already fully paid' });
+        }
+        const repaymentAmount = Math.min(amount, loan.remainingAmount);
+        // 1. PalmKash Integration for MoMo
+        let externalRef = null;
+        if (paymentMethod === 'mobile_money' || paymentMethod === 'momo' || paymentMethod === 'airtel') {
+            const palmKash = (yield Promise.resolve().then(() => __importStar(require('../services/palmKash.service')))).default;
+            const pmResult = yield palmKash.initiatePayment({
+                amount: parseFloat(repaymentAmount.toString()),
+                phoneNumber: phone || ((_a = retailerProfile.user) === null || _a === void 0 ? void 0 : _a.phone) || '',
+                referenceId: `RLREPAY-${Date.now()}`,
+                description: `Retailer Loan Repayment (Loan #${loanId})`
+            });
+            if (!pmResult.success) {
+                return res.status(400).json({ success: false, error: pmResult.error });
+            }
+            externalRef = pmResult.transactionId;
+        }
+        // 2. Wallet Balance Check
+        if (paymentMethod === 'wallet') {
+            if (retailerProfile.walletBalance < repaymentAmount) {
+                return res.status(400).json({ error: 'Insufficient wallet balance' });
+            }
+        }
+        // 3. Process Transaction
+        yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a, _b;
+            // Debit wallet balance if chosen
+            if (paymentMethod === 'wallet') {
+                yield tx.retailerProfile.update({
+                    where: { id: retailerProfile.id },
+                    data: { walletBalance: { decrement: repaymentAmount } }
+                });
+            }
+            // Update remaining amount and status of the RetailerLoan
+            const newRemaining = Math.max(0, loan.remainingAmount - repaymentAmount);
+            const newStatus = newRemaining === 0 ? 'paid' : 'active';
+            yield tx.retailerLoan.update({
+                where: { id: loan.id },
+                data: {
+                    remainingAmount: newRemaining,
+                    status: newStatus
+                }
+            });
+            // Create a WalletTransaction record for audit
+            const txRecord = yield tx.walletTransaction.create({
+                data: {
+                    retailerId: retailerProfile.id,
+                    type: 'credit_repayment',
+                    amount: repaymentAmount,
+                    description: `Loan #${loanId} Repayment via ${paymentMethod}`,
+                    reference: externalRef || `LNREPAY-${Date.now()}`,
+                    status: 'completed'
+                }
+            });
+            // Notify Retailer (RET-EMAIL-010)
+            if ((_a = retailerProfile.user) === null || _a === void 0 ? void 0 : _a.email) {
+                yield email_queue_1.emailQueue.add('credit-payment-confirmation', {
+                    to: retailerProfile.user.email,
+                    templateType: 'credit-payment-confirmation',
+                    data: {
+                        retail_name: retailerProfile.shopName,
+                        paid_amount: repaymentAmount.toLocaleString(),
+                        remaining_balance: newRemaining.toLocaleString(),
+                        payment_date: new Date().toLocaleDateString(),
+                        transaction_id: txRecord.reference
+                    },
+                    relatedEntity: { type: 'TRANSACTION', id: txRecord.id.toString() }
+                });
+            }
+            // Notify Wholesaler (WHO-EMAIL-008)
+            if (retailerProfile.linkedWholesalerId) {
+                const wholesaler = yield tx.wholesalerProfile.findUnique({
+                    where: { id: retailerProfile.linkedWholesalerId },
+                    include: { user: true }
+                });
+                if ((_b = wholesaler === null || wholesaler === void 0 ? void 0 : wholesaler.user) === null || _b === void 0 ? void 0 : _b.email) {
+                    yield email_queue_1.emailQueue.add('wholesaler-payment-alert', {
+                        to: wholesaler.user.email,
+                        templateType: 'wholesaler-credit-payment-received',
+                        data: {
+                            wholesaler_name: wholesaler.companyName,
+                            retail_name: retailerProfile.shopName,
+                            paid_amount: repaymentAmount.toLocaleString(),
+                            remaining_balance: newRemaining.toLocaleString(),
+                            payment_date: new Date().toLocaleDateString(),
+                            transaction_id: txRecord.reference,
+                            dashboard_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/wholesaler/credit`
+                        },
+                        relatedEntity: { type: 'TRANSACTION', id: txRecord.id.toString() }
+                    });
+                }
+            }
+        }));
+        res.json({ success: true, message: 'Repayment successful' });
+    }
+    catch (error) {
+        console.error('Retailer loan repayment error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.payRetailerLoan = payRetailerLoan;

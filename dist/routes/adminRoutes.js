@@ -81,6 +81,9 @@ router.delete('/employees/:id', adminController_1.deleteEmployee);
 router.get('/reports', adminController_1.getReports);
 router.get('/reports/transactions', adminController_1.getTransactionReport);
 router.get('/reports/revenue', adminController_1.getRevenueReport);
+// Refund Requests
+router.get('/refund-requests', adminController_1.getRefundRequests);
+router.post('/refund-requests/:id/process', adminController_1.processRefundRequest);
 // System Config Routes
 router.get('/system-config', adminController_1.getSystemConfig);
 router.put('/system-config', adminController_1.updateSystemConfig);
@@ -114,6 +117,13 @@ router.post('/settlement-invoices', adminController_1.createSettlementInvoice);
 router.get('/settlement-invoices/:id', adminController_1.getSettlementInvoice);
 router.put('/settlement-invoices/:id', adminController_1.updateSettlementInvoice);
 router.delete('/settlement-invoices/:id', adminController_1.deleteSettlementInvoice);
+// ==========================================
+// PROFIT INVOICE ROUTES
+// ==========================================
+router.get('/profit-invoices', adminController_1.getAdminProfitInvoices);
+router.post('/profit-invoices/generate', adminController_1.generateAdminProfitInvoice);
+router.get('/profit-invoices/recipients', adminController_1.getProfitInvoiceRecipients);
+router.get('/profit-invoices/stats/:type/:id', adminController_1.getProfitInvoiceStats);
 // ==========================================
 // WHOLESALE ORDER MANAGEMENT
 // ==========================================
