@@ -4207,7 +4207,7 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
       const orders = await prisma.order.findMany({
         where: {
           wholesalerId: Number(id),
-          status: 'completed',
+          status: { in: ['delivered', 'completed'] },
           ...(dateFilter ? { createdAt: dateFilter } : {})
         },
         include: { orderItems: { include: { product: true } } }
