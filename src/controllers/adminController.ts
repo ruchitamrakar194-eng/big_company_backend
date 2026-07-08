@@ -3821,16 +3821,31 @@ export const sendManualEmail = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: 'No recipients resolved' });
     }
 
+    // Query names for recipients to dynamically replace placeholders
+    const users = await prisma.user.findMany({
+      where: { email: { in: targetRecipients } }
+    });
+    const userMap = new Map(users.map(u => [u.email?.toLowerCase(), u]));
+
     // Add each to queue (Requirement 4.2.10)
-    const jobs = targetRecipients.map(email => ({
-      name: 'manual-announcement',
-      data: {
-        to: email,
-        subject,
-        html,
-        templateType: category || 'ANNOUNCEMENT'
-      }
-    }));
+    const jobs = targetRecipients.map(email => {
+      const u = userMap.get(email.toLowerCase());
+      const name = u?.name || 'Valued Customer';
+      
+      const namePlaceholderRegex = /{{(customer_name|retail_name|wholesaler_name|name)}}/g;
+      const finalHtml = html.replace(namePlaceholderRegex, name);
+      const finalSubject = subject.replace(namePlaceholderRegex, name);
+
+      return {
+        name: 'manual-announcement',
+        data: {
+          to: email,
+          subject: finalSubject,
+          html: finalHtml,
+          templateType: category || 'ANNOUNCEMENT'
+        }
+      };
+    });
 
     await emailQueue.addBulk(jobs);
 

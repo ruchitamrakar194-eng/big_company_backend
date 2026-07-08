@@ -2,7 +2,7 @@ export class TemplateService {
   /**
    * Base wrapper for all emails to ensure consistent branding.
    */
-  private static wrap(content: string, title: string = 'Big Innovation Group Ltd'): string {
+  static wrap(content: string, title: string = 'Big Innovation Group Ltd'): string {
     const hasRegards = content.includes('Regards') || content.includes('Big Innovation Group Ltd') || content.includes('info@big.co.rw') || content.includes('Info@big.co.rw');
     return `
       <!DOCTYPE html>

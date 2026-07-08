@@ -133,6 +133,12 @@ export const emailWorker = new Worker(
           }
         }
 
+        // Wrap manual/announcement HTML inside the template layout if it doesn't already have HTML boilerplate
+        if (finalHtml && !finalHtml.includes('<!DOCTYPE') && !finalHtml.includes('<html')) {
+          const { TemplateService } = await import('../services/template.service');
+          finalHtml = TemplateService.wrap(finalHtml);
+        }
+
         // Send the email and pass the logId to track retries on the same record
         const result = await EmailService.sendEmail(
           finalTo,
