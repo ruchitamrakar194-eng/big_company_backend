@@ -34,7 +34,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       allOrders,
       todayOrders,
       allProducts,
-      pendingCreditRequests
+      pendingCreditRequests,
+      systemConfig
     ] = await Promise.all([
       // All orders for total revenue (filtered by lastSettlementDate if set)
       prisma.order.findMany({
@@ -74,8 +75,11 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
           },
           status: 'pending'
         }
-      })
+      }),
+      prisma.systemConfig.findFirst()
     ]);
+
+    const wholesalerMarkupPct = (systemConfig as any)?.wholesalerMarkup || 20;
 
     // Calculate today's stats (excluding cancelled or rejected orders)
     const activeTodayOrders = todayOrders.filter(o => o.status !== 'cancelled' && o.status !== 'rejected');
@@ -127,9 +131,10 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
     });
     const profitWallet = confirmedOrderItems.reduce((sum, item) => {
-      const cost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
+      const rawCost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
         ? item.product.supplierCost
         : (item.product.costPrice || 0);
+      const cost = rawCost > 0 ? rawCost : item.price / (1 + wholesalerMarkupPct / 100);
       return sum + (item.quantity * (item.price - cost));
     }, 0);
 
@@ -319,12 +324,22 @@ export const getInventoryStats = async (req: AuthRequest, res: Response) => {
     const outOfStockCount = products.filter(p => p.stock === 0).length;
 
     // Calculate realized profit (profit wallet) from confirmed sales/revenue
+    const dateFilter = wholesalerProfile.lastSettlementDate ? { gte: wholesalerProfile.lastSettlementDate } : undefined;
+    const systemConfig = await prisma.systemConfig.findFirst();
+    const wholesalerMarkupPct = (systemConfig as any)?.wholesalerMarkup || 20;
+
     const orders = await prisma.order.findMany({
-      where: { wholesalerId: wholesalerProfile.id }
+      where: { 
+        wholesalerId: wholesalerProfile.id,
+        ...(dateFilter ? { createdAt: dateFilter } : {})
+      }
     });
     const orderItems = await prisma.orderItem.findMany({
       where: {
-        order: { wholesalerId: wholesalerProfile.id }
+        order: { 
+          wholesalerId: wholesalerProfile.id,
+          ...(dateFilter ? { createdAt: dateFilter } : {})
+        }
       },
       include: { product: true }
     });
@@ -332,9 +347,13 @@ export const getInventoryStats = async (req: AuthRequest, res: Response) => {
       const order = orders.find(o => o.id === item.orderId);
       return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
     });
-    const realizedProfit = confirmedOrderItems.reduce((sum, item) =>
-      sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0
-    );
+    const realizedProfit = confirmedOrderItems.reduce((sum, item) => {
+      const rawCost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
+        ? item.product.supplierCost
+        : (item.product.costPrice || 0);
+      const cost = rawCost > 0 ? rawCost : item.price / (1 + wholesalerMarkupPct / 100);
+      return sum + (item.quantity * (item.price - cost));
+    }, 0);
 
     res.json({
       totalProducts,
