@@ -3588,7 +3588,7 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
 
           await tx.product.update({
             where: { id: existingProduct.id },
-            data: { 
+            data: {
               stock: { increment: addStock },
               taxType: item.product.taxType || 'B'
             }
@@ -3827,11 +3827,12 @@ export const sendManualEmail = async (req: AuthRequest, res: Response) => {
     });
     const userMap = new Map(users.map(u => [u.email?.toLowerCase(), u]));
 
+
     // Add each to queue (Requirement 4.2.10)
     const jobs = targetRecipients.map(email => {
       const u = userMap.get(email.toLowerCase());
       const name = u?.name || 'Valued Customer';
-      
+
       const namePlaceholderRegex = /{{(customer_name|retail_name|wholesaler_name|name)}}/g;
       const finalHtml = html.replace(namePlaceholderRegex, name);
       const finalSubject = subject.replace(namePlaceholderRegex, name);
