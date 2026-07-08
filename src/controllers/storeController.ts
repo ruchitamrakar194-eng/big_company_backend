@@ -1247,6 +1247,7 @@ export const repayLoan = async (req: AuthRequest, res: Response) => {
 
         if (!dashboardWallet) throw new Error('Dashboard wallet not found');
 
+
         // Deduct from Dashboard
         await prisma.wallet.update({
           where: { id: dashboardWallet.id },
