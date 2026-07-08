@@ -935,19 +935,36 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
         include: { user: true }
       });
 
-      if (consumer?.user?.phone) {
+      if (consumer?.user?.phone || consumer?.user?.email) {
         const { emailQueue } = await import('../queues/email.queue');
-        await emailQueue.add('order-delivered-sms', {
-          to: consumer.user.phone,
-          templateType: 'order-delivered-sms', // Mapped to CUS-SMS-002
-          data: {
-            customer_name: consumer.fullName || consumer.user.name || 'Customer',
-            order_id: updatedSale.id.toString(),
-            amount: updatedSale.totalAmount.toLocaleString(),
-            delivery_date: new Date().toLocaleDateString()
-          },
-          relatedEntity: { type: 'SALE', id: updatedSale.id.toString() }
-        });
+        
+        if (consumer?.user?.phone) {
+          await emailQueue.add('order-delivered-sms', {
+            to: consumer.user.phone,
+            templateType: 'order-delivered-sms', // Mapped to CUS-SMS-002
+            data: {
+              customer_name: consumer.fullName || consumer.user.name || 'Customer',
+              order_id: updatedSale.id.toString(),
+              amount: updatedSale.totalAmount.toLocaleString(),
+              delivery_date: new Date().toLocaleDateString()
+            },
+            relatedEntity: { type: 'SALE', id: updatedSale.id.toString() }
+          });
+        }
+
+        if (consumer?.user?.email) {
+          await emailQueue.add('customer-order-delivered-email', {
+            to: consumer.user.email,
+            templateType: 'customer-order-delivered-email', // Mapped to CUS-EMAIL-002
+            data: {
+              customer_name: consumer.fullName || consumer.user.name || 'Customer',
+              order_id: updatedSale.id.toString(),
+              amount: updatedSale.totalAmount.toLocaleString(),
+              delivery_date: new Date().toLocaleDateString()
+            },
+            relatedEntity: { type: 'SALE', id: updatedSale.id.toString() }
+          });
+        }
       }
     } catch (err) {
       console.error('Customer delivery notification failed:', err);

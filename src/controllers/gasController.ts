@@ -461,12 +461,11 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
             
             // Trigger Email (if email exists)
             if (consumerProfile.user.email) {
-                await emailQueue.add('gas-recharge-success-email', {
+                await emailQueue.add('customer-gas-recharge-email', {
                     to: consumerProfile.user.email,
-                    templateType: 'gas top-up', // Mapped to user's 'gas top-up' template
+                    templateType: 'customer-gas-recharge-email', // Mapped to CUS-EMAIL-004
                     data: {
-                        name: consumerProfile.fullName || consumerProfile.user.name || 'Valued Customer',
-                        email: consumerProfile.user.email,
+                        customer_name: consumerProfile.fullName || consumerProfile.user.name || 'Valued Customer',
                         meter_name: meter.aliasName || 'Meter',
                         meter_id: meter_number,
                         amount: amount.toLocaleString(),

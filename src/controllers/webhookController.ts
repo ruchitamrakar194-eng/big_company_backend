@@ -83,6 +83,31 @@ export const handlePalmKashWebhook = async (req: Request, res: Response) => {
                 data: { balance: { increment: transaction.amount } }
               })
             ]);
+
+            // Notify Consumer of successful wallet top-up via webhook payment gateway (CUS-EMAIL-003)
+            try {
+              const wallet = await prisma.wallet.findUnique({
+                where: { id: transaction.walletId },
+                include: { consumerProfile: { include: { user: true } } }
+              });
+              
+              if (wallet?.consumerProfile?.user?.email) {
+                const { emailQueue } = await import('../queues/email.queue');
+                await emailQueue.add('customer-wallet-topup-email', {
+                  to: wallet.consumerProfile.user.email,
+                  templateType: 'customer-wallet-topup-email', // Mapped to CUS-EMAIL-003
+                  data: {
+                    customer_name: wallet.consumerProfile.fullName || wallet.consumerProfile.user.name || 'Customer',
+                    amount: transaction.amount.toLocaleString(),
+                    new_balance: (wallet.balance + transaction.amount).toLocaleString(),
+                    transaction_id: activeReference
+                  },
+                  relatedEntity: { type: 'WALLET_TRANSACTION', id: transaction.id.toString() }
+                });
+              }
+            } catch (err) {
+              console.error('[Webhook] Consumer topup notification failed:', err);
+            }
         }
       } else {
         console.log(`ℹ️ [Webhook] Transaction ${activeReference} already processed or not found.`);

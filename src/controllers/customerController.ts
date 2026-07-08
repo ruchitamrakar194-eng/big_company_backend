@@ -359,20 +359,35 @@ export const topupWallet = async (req: AuthRequest, res: Response) => {
             }
         });
 
-        // 4. Trigger Customer SMS Notification (CUS-SMS-003)
         try {
             const { emailQueue } = await import('../queues/email.queue');
-            await emailQueue.add('customer-wallet-topup', {
-                to: consumerProfile.user.phone,
-                templateType: 'customer-wallet-topup', // Mapped to CUS-SMS-003
-                data: {
-                    customer_name: consumerProfile.fullName || consumerProfile.user.name || 'Customer',
-                    amount: amount.toLocaleString(),
-                    new_balance: updatedWallet.balance.toLocaleString(),
-                    transaction_id: externalId || 'N/A'
-                },
-                relatedEntity: { type: 'WALLET_TRANSACTION', id: externalId || 'N/A' }
-            });
+            if (consumerProfile.user.phone) {
+                await emailQueue.add('customer-wallet-topup', {
+                    to: consumerProfile.user.phone,
+                    templateType: 'customer-wallet-topup', // Mapped to CUS-SMS-003
+                    data: {
+                        customer_name: consumerProfile.fullName || consumerProfile.user.name || 'Customer',
+                        amount: amount.toLocaleString(),
+                        new_balance: updatedWallet.balance.toLocaleString(),
+                        transaction_id: externalId || 'N/A'
+                    },
+                    relatedEntity: { type: 'WALLET_TRANSACTION', id: externalId || 'N/A' }
+                });
+            }
+
+            if (consumerProfile.user.email) {
+                await emailQueue.add('customer-wallet-topup-email', {
+                    to: consumerProfile.user.email,
+                    templateType: 'customer-wallet-topup-email', // Mapped to CUS-EMAIL-003
+                    data: {
+                        customer_name: consumerProfile.fullName || consumerProfile.user.name || 'Customer',
+                        amount: amount.toLocaleString(),
+                        new_balance: updatedWallet.balance.toLocaleString(),
+                        transaction_id: externalId || 'N/A'
+                    },
+                    relatedEntity: { type: 'WALLET_TRANSACTION', id: externalId || 'N/A' }
+                });
+            }
         } catch (err) {
             console.error('Customer topup notification failed:', err);
         }
