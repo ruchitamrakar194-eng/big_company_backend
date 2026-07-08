@@ -1719,26 +1719,28 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           data: { walletBalance: { decrement: totalAmount } }
         });
       } else if (paymentMethod === 'credit') {
-        // Validate against active loan principals — same source the frontend displays
+        // Validate against remaining loan balance — same field frontend displays
         const activeLoans = await prisma.retailerLoan.findMany({
           where: { retailerId: retailerProfile.id, status: 'active' }
         });
-        const totalAvailablePrincipal = activeLoans.reduce((sum, l) => sum + (l.amount || 0), 0);
+        const totalAvailableCredit = activeLoans.reduce((sum, l) => sum + (l.remainingAmount || 0), 0);
 
-        if (totalAvailablePrincipal < totalAmount) {
+        if (totalAvailableCredit < totalAmount) {
           throw new Error('Insufficient credit limit available');
         }
 
-        // Deduct from remaining loan amounts proportionally
+        // Deduct from remainingAmount across active loans
         let remaining = totalAmount;
         for (const loan of activeLoans) {
           if (remaining <= 0) break;
-          const deduct = Math.min(loan.amount, remaining);
+          const deduct = Math.min(loan.remainingAmount, remaining);
+          const newRemaining = loan.remainingAmount - deduct;
           await prisma.retailerLoan.update({
             where: { id: loan.id },
             data: {
-              amount: { decrement: deduct },
-              remainingAmount: { decrement: deduct }
+              remainingAmount: newRemaining,
+              // Mark loan as paid if fully spent
+              status: newRemaining <= 0 ? 'paid' : 'active'
             }
           });
           remaining -= deduct;
