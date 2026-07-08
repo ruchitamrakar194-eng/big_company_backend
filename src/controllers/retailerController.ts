@@ -1719,29 +1719,25 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           data: { walletBalance: { decrement: totalAmount } }
         });
       } else if (paymentMethod === 'credit') {
-        // amount = spendable credit the retailer can use to buy stock
-        // remainingAmount = what they owe back (only decreases via repayment)
-        const activeLoans = await prisma.retailerLoan.findMany({
-          where: { retailerId: retailerProfile.id, status: 'active' }
+        // Credit line persists even after repayment — check amount > 0, not just active status
+        const loansWithCredit = await prisma.retailerLoan.findMany({
+          where: { retailerId: retailerProfile.id, amount: { gt: 0 } }
         });
-        const totalSpendableCredit = activeLoans.reduce((sum, l) => sum + (l.amount || 0), 0);
+        const totalSpendableCredit = loansWithCredit.reduce((sum, l) => sum + (l.amount || 0), 0);
 
         if (totalSpendableCredit < totalAmount) {
           throw new Error('Insufficient credit limit available');
         }
 
-        // Deduct from amount (spendable credit) across active loans
+        // Deduct from amount (spendable credit) — NOT remainingAmount
         let remaining = totalAmount;
-        for (const loan of activeLoans) {
+        for (const loan of loansWithCredit) {
           if (remaining <= 0) break;
           const deduct = Math.min(loan.amount, remaining);
-          const newAmount = loan.amount - deduct;
           await prisma.retailerLoan.update({
             where: { id: loan.id },
-            data: {
-              amount: newAmount
-              // remainingAmount is NOT touched — repayment handles that
-            }
+            data: { amount: loan.amount - deduct }
+            // remainingAmount is ONLY touched during repayment
           });
           remaining -= deduct;
         }
