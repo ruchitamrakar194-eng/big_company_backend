@@ -75,11 +75,11 @@ async function main() {
     console.log('🔧 Creating a mock gas meter for the customer...');
     meter = await prisma.gasMeter.create({
       data: {
-        consumerProfileId: profile.id,
+        consumerId: profile.id,
         meterNumber: `MTR-SIM-${Math.floor(100000 + Math.random() * 900000)}`,
         aliasName: 'Kitchen Smart Meter',
         status: 'active',
-        balance: 0
+        currentUnits: 0
       }
     });
   }
@@ -98,23 +98,24 @@ async function main() {
   const order = await prisma.customerOrder.create({
     data: {
       consumerId: profile.id,
-      retailerId: profile.linkedRetailerId || 24, // Fallback to retailer 24
-      totalAmount: rechargeAmount,
+      amount: rechargeAmount,
       status: 'completed',
-      paymentMethod: 'wallet',
+      orderType: 'gas_recharge',
       metadata: `GAS-SIM-${Date.now()}`
     }
   });
 
   const token = Array.from({ length: 4 }, () => Math.floor(1000 + Math.random() * 9000)).join('-');
+  const config = await prisma.systemConfig.findFirst();
+  const gasPrice = config?.gasPricePerM3 || 6500;
+  const units = Number((rechargeAmount / gasPrice).toFixed(4));
 
   const gasTopupObj = await prisma.gasTopup.create({
     data: {
       consumerId: profile.id,
       meterId: meter.id,
-      orderId: order.id.toString(),
       amount: rechargeAmount,
-      token: token,
+      units: units,
       status: 'completed'
     }
   });
