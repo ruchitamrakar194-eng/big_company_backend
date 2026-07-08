@@ -2634,7 +2634,20 @@ const recalculateAllProductsBackground = async (config: any) => {
       const rProdAny = rProduct as any;
       if (rProduct.costPrice === null || rProduct.costPrice === undefined) continue;
 
-      const taxType = rProdAny.taxType || 'B';
+      // Find the corresponding wholesaler product robustly to get the correct live taxType
+      const wholesalerProduct = await prisma.product.findFirst({
+        where: {
+          retailerId: null,
+          wholesalerId: { not: null },
+          OR: [
+            rProduct.sku ? { sku: rProduct.sku } : { id: -1 },
+            rProduct.barcode ? { barcode: rProduct.barcode } : { id: -1 },
+            { name: rProduct.name }
+          ]
+        }
+      });
+
+      const taxType = wholesalerProduct?.taxType || rProdAny.taxType || 'B';
 
       const retailPricing = calculateRetailPrice(
         rProduct.costPrice,
@@ -2646,7 +2659,8 @@ const recalculateAllProductsBackground = async (config: any) => {
       await prisma.product.update({
         where: { id: rProduct.id },
         data: {
-          price: retailPricing.finalConsumerShelfPrice
+          price: retailPricing.finalConsumerShelfPrice,
+          taxType: taxType
         }
       });
       retailUpdatedCount++;
@@ -3574,7 +3588,10 @@ export const confirmWholesaleDelivery = async (req: AuthRequest, res: Response) 
 
           await tx.product.update({
             where: { id: existingProduct.id },
-            data: { stock: { increment: addStock } }
+            data: { 
+              stock: { increment: addStock },
+              taxType: item.product.taxType || 'B'
+            }
           });
         } else {
           // Create new product for retailer based on wholesaler's product

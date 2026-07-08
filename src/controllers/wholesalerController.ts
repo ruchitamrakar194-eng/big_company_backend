@@ -1324,7 +1324,8 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
             where: { id: existingProduct.id },
             data: { 
               stock: { increment: addStock },
-              status: 'active'
+              status: 'active',
+              taxType: item.product.taxType || 'B'
             }
           });
         } else {
