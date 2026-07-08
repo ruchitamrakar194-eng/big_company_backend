@@ -444,6 +444,53 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           relatedEntity: { type: 'SALE', id: result.id.toString() }
         });
       }
+
+      // 3. Notify Consumer of Gas Rewards (CUS-SMS-006 / CUS-EMAIL-006)
+      if (result.consumerId) {
+        const gasRewardObj = await prisma.gasReward.findFirst({
+          where: { saleId: result.id, units: { gt: 0 } }
+        });
+        if (gasRewardObj) {
+          const rewardUnits = gasRewardObj.units;
+          const rewardConsumer = await prisma.consumerProfile.findUnique({
+            where: { id: result.consumerId },
+            include: { user: true }
+          });
+          
+          if (rewardConsumer) {
+            const allRewards = await prisma.gasReward.findMany({
+              where: { consumerId: result.consumerId }
+            });
+            const totalUnits = allRewards.reduce((sum, r) => sum + r.units, 0);
+
+            if (rewardConsumer.user?.phone) {
+              await emailQueue.add('gas-reward-update', {
+                to: rewardConsumer.user.phone,
+                templateType: 'gas-reward-update', // Mapped to CUS-SMS-006
+                data: {
+                  customer_name: rewardConsumer.fullName || rewardConsumer.user.name || 'Customer',
+                  reward_amount: rewardUnits.toString(),
+                  new_reward_balance: totalUnits.toFixed(4)
+                },
+                relatedEntity: { type: 'GAS_REWARD', id: result.id.toString() }
+              });
+            }
+
+            if (rewardConsumer.user?.email) {
+              await emailQueue.add('customer-reward-update-email', {
+                to: rewardConsumer.user.email,
+                templateType: 'customer-reward-update-email', // Mapped to CUS-EMAIL-006
+                data: {
+                  customer_name: rewardConsumer.fullName || rewardConsumer.user.name || 'Customer',
+                  reward_amount: rewardUnits.toString(),
+                  new_reward_balance: totalUnits.toFixed(4)
+                },
+                relatedEntity: { type: 'GAS_REWARD', id: result.id.toString() }
+              });
+            }
+          }
+        }
+      }
     } catch (triggerError) {
       console.error('Error in post-order triggers:', triggerError);
       // Don't fail the response if email fails

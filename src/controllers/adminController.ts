@@ -4078,6 +4078,26 @@ export const processRefundRequest = async (req: AuthRequest, res: Response) => {
       }
     });
 
+    // Trigger Customer Refund Notification (CUS-EMAIL-009)
+    try {
+      if (transaction.wallet?.consumerProfile?.user?.email) {
+        const { emailQueue } = await import('../queues/email.queue');
+        await emailQueue.add('customer-refund-request-email', {
+          to: transaction.wallet.consumerProfile.user.email,
+          templateType: 'customer-refund-request-email', // Mapped to CUS-EMAIL-009
+          data: {
+            customer_name: transaction.wallet.consumerProfile.fullName || transaction.wallet.consumerProfile.user.name || 'Customer',
+            amount: transaction.amount.toLocaleString(),
+            status: action === 'approve' ? 'Approved & Refunded' : 'Rejected',
+            date: new Date().toLocaleDateString()
+          },
+          relatedEntity: { type: 'WALLET_TRANSACTION', id: transaction.id.toString() }
+        });
+      }
+    } catch (err) {
+      console.error('Customer refund notification failed:', err);
+    }
+
     res.json({ success: true, message: `Refund request ${action}d successfully` });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
