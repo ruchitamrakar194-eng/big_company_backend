@@ -1009,15 +1009,12 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
     }
 
     // Read interest rates (matching admin controller logic)
-    let rates = { customerInterestRate: 10, retailerInterestRate: 5, wholesalerInterestRate: 8 };
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const p = path.join(__dirname, '..', 'customRates.json');
-      if (fs.existsSync(p)) {
-        rates = { ...rates, ...JSON.parse(fs.readFileSync(p, 'utf8')) };
-      }
-    } catch (e) { }
+    const config = await prisma.systemConfig.findFirst();
+    const rates = {
+      customerInterestRate: config?.customerLoanInterest ?? 10,
+      retailerInterestRate: config?.retailerLoanInterest ?? 0,
+      wholesalerInterestRate: config?.wholesalerLoanInterest ?? 8
+    };
 
     const loansRaw = await prisma.loan.findMany({
       where: { consumerId: consumerProfile.id },
@@ -1225,16 +1222,13 @@ export const repayLoan = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Load custom rates outside the transaction to avoid blocking I/O operations inside DB transaction
-    let rates = { customerInterestRate: 10, retailerInterestRate: 5, wholesalerInterestRate: 8 };
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const p = path.join(__dirname, '..', 'customRates.json');
-      if (fs.existsSync(p)) {
-        rates = { ...rates, ...JSON.parse(fs.readFileSync(p, 'utf8')) };
-      }
-    } catch (e) { }
+    // Load dynamic rates from SystemConfig table
+    const config = await prisma.systemConfig.findFirst();
+    const rates = {
+      customerInterestRate: config?.customerLoanInterest ?? 10,
+      retailerInterestRate: config?.retailerLoanInterest ?? 0,
+      wholesalerInterestRate: config?.wholesalerLoanInterest ?? 8
+    };
 
     await prisma.$transaction(async (prisma) => {
       // Find the loan (ensure ID is number)
@@ -1375,17 +1369,8 @@ export const getActiveLoanLedger = async (req: AuthRequest, res: Response) => {
     });
 
     const paidAmount = repayments.reduce((sum, t) => sum + t.amount, 0);
-    let rates: any = {};
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const p = path.join(process.cwd(), 'data', 'system_rates.json');
-      if (fs.existsSync(p)) {
-        rates = JSON.parse(fs.readFileSync(p, 'utf8'));
-      }
-    } catch (e) { }
-
-    const interestRate = Number(rates.customerInterestRate) || 10;
+    const config = await prisma.systemConfig.findFirst();
+    const interestRate = config?.customerLoanInterest ?? 10;
     const interestAmount = Math.round(loan.amount * (interestRate / 100));
 
     const totalAmount = loan.amount + interestAmount;
