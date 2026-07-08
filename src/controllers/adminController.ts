@@ -2078,6 +2078,24 @@ export const approveLoan = async (req: AuthRequest, res: Response) => {
         });
       }
 
+      // Fetch dynamic interest rates from SystemConfig for Retailer
+      const systemConfig = await prisma.systemConfig.findFirst();
+      const interestRate = systemConfig?.retailerLoanInterest ?? 18;
+      const interestAmount = request.amount * (interestRate / 100);
+      const totalRepayable = request.amount + interestAmount;
+
+      // Create missing RetailerLoan record to show up in retailer portal
+      await (prisma as any).retailerLoan.create({
+        data: {
+          retailerId: request.retailerId,
+          amount: request.amount,
+          interestRate,
+          totalRepayable,
+          remainingAmount: totalRepayable,
+          status: 'active'
+        }
+      });
+
       return res.json({ success: true, loan: { id: numericId, status: 'approved' } });
     }
 
