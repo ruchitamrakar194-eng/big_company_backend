@@ -4024,7 +4024,7 @@ export const processRefundRequest = async (req: AuthRequest, res: Response) => {
 
     const transaction = await prisma.walletTransaction.findUnique({
       where: { id: Number(id) },
-      include: { wallet: { include: { consumerProfile: true } } }
+      include: { wallet: { include: { consumerProfile: { include: { user: true } } } } }
     });
 
     if (!transaction) {
