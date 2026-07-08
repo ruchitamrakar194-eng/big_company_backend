@@ -2078,6 +2078,7 @@ export const approveLoan = async (req: AuthRequest, res: Response) => {
         });
       }
 
+
       // Fetch dynamic interest rates from SystemConfig for Retailer
       const systemConfig = await prisma.systemConfig.findFirst();
       const interestRate = systemConfig?.retailerLoanInterest ?? 18;
@@ -4019,7 +4020,7 @@ export const processRefundRequest = async (req: AuthRequest, res: Response) => {
 
     await prisma.$transaction(async (tx) => {
       const newStatus = action === 'approve' ? 'approved' : 'rejected';
-      
+
       // Update transaction status
       await tx.walletTransaction.update({
         where: { id: transaction.id },
@@ -4034,7 +4035,7 @@ export const processRefundRequest = async (req: AuthRequest, res: Response) => {
         const currentWallet = await tx.wallet.findUnique({
           where: { id: transaction.walletId }
         });
-        
+
         if (currentWallet && currentWallet.balance < transaction.amount) {
           throw new Error('Customer wallet has insufficient balance for this refund');
         }
@@ -4051,10 +4052,10 @@ export const processRefundRequest = async (req: AuthRequest, res: Response) => {
             where: { id: transaction.walletId, type: 'dashboard_wallet' }
           });
           if (profileWalletCount) {
-             await tx.consumerProfile.update({
-               where: { id: transaction.wallet.consumerId },
-               data: { walletBalance: { decrement: transaction.amount } }
-             });
+            await tx.consumerProfile.update({
+              where: { id: transaction.wallet.consumerId },
+              data: { walletBalance: { decrement: transaction.amount } }
+            });
           }
         }
       }
@@ -4167,7 +4168,7 @@ export const getProfitInvoiceRecipients = async (req: AuthRequest, res: Response
       where: { isVerified: true },
       select: { id: true, shopName: true }
     });
-    
+
     const wholesalers = await prisma.wholesalerProfile.findMany({
       where: { isVerified: true },
       select: { id: true, companyName: true }
@@ -4188,13 +4189,13 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
     let totalRevenue = 0;
     let totalCost = 0;
     let gasRewardsGiven = 0;
-    
+
     if (type === 'Retailer') {
       const retailer = await prisma.retailerProfile.findUnique({ where: { id: Number(id) } });
       if (!retailer) return res.status(404).json({ success: false, error: 'Retailer not found' });
-      
+
       const dateFilter = retailer.lastSettlementDate ? { gte: retailer.lastSettlementDate } : undefined;
-      
+
       const sales = await prisma.sale.findMany({
         where: {
           retailerId: Number(id),
@@ -4203,20 +4204,20 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
         },
         include: { saleItems: { include: { product: true } } }
       });
-      
+
       const systemConfig = await prisma.systemConfig.findFirst();
       const retailerMarkup = systemConfig?.retailerMarkup || 20;
 
       for (const sale of sales) {
         for (const item of sale.saleItems) {
           totalRevenue += (item.price * item.quantity);
-          const cost = item.product.costPrice && item.product.costPrice > 0 
-            ? item.product.costPrice 
+          const cost = item.product.costPrice && item.product.costPrice > 0
+            ? item.product.costPrice
             : item.price / (1 + retailerMarkup / 100);
           totalCost += (cost * item.quantity);
         }
       }
-      
+
       const [rewards] = await Promise.all([
         prisma.gasReward.aggregate({
           where: {
@@ -4226,11 +4227,11 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
           _sum: { units: true }
         })
       ]);
-      
+
       const gasUnits = rewards._sum.units || 0;
       const gasPrice = systemConfig?.gasPricePerM3 || 6500;
       gasRewardsGiven = Math.round(gasUnits * gasPrice);
-      
+
       res.json({
         success: true,
         data: {
@@ -4239,13 +4240,13 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
           gasRewardsGiven
         }
       });
-      
+
     } else if (type === 'Wholesaler') {
       const wholesaler = await prisma.wholesalerProfile.findUnique({ where: { id: Number(id) } });
       if (!wholesaler) return res.status(404).json({ success: false, error: 'Wholesaler not found' });
-      
+
       const dateFilter = wholesaler.lastSettlementDate ? { gte: wholesaler.lastSettlementDate } : undefined;
-      
+
       const orders = await prisma.order.findMany({
         where: {
           wholesalerId: Number(id),
@@ -4254,7 +4255,7 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
         },
         include: { orderItems: { include: { product: true } } }
       });
-      
+
       for (const order of orders) {
         for (const item of order.orderItems) {
           totalRevenue += (item.price * item.quantity);
@@ -4264,7 +4265,7 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
           totalCost += (cost * item.quantity);
         }
       }
-      
+
       res.json({
         success: true,
         data: {
