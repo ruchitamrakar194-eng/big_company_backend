@@ -87,7 +87,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
 
     // Calculate inventory values
     const inventoryValueWallet = allProducts.reduce((sum, p) =>
-      sum + (p.stock * (p.costPrice || 0)), 0
+      sum + (p.stock * (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0))), 0
     );
 
     const stockValueWholesaler = allProducts.reduce((sum, p) =>
@@ -126,9 +126,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       const order = allOrders.find(o => o.id === item.orderId);
       return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
     });
-    const profitWallet = confirmedOrderItems.reduce((sum, item) =>
-      sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0
-    );
+    const profitWallet = confirmedOrderItems.reduce((sum, item) => {
+      const cost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
+        ? item.product.supplierCost
+        : (item.product.costPrice || 0);
+      return sum + (item.quantity * (item.price - cost));
+    }, 0);
 
     // Calculate top products
     const productStatsMap: Record<string, { name: string; quantity: number; revenue: number }> = {};

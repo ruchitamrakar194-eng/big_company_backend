@@ -4186,22 +4186,27 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
         include: { saleItems: { include: { product: true } } }
       });
       
+      const systemConfig = await prisma.systemConfig.findFirst();
+      const retailerMarkup = systemConfig?.retailerMarkup || 20;
+
       for (const sale of sales) {
         for (const item of sale.saleItems) {
           totalRevenue += (item.price * item.quantity);
-          totalCost += ((item.product.costPrice || 0) * item.quantity);
+          const cost = item.product.costPrice && item.product.costPrice > 0 
+            ? item.product.costPrice 
+            : item.price / (1 + retailerMarkup / 100);
+          totalCost += (cost * item.quantity);
         }
       }
       
-      const [rewards, systemConfig] = await Promise.all([
+      const [rewards] = await Promise.all([
         prisma.gasReward.aggregate({
           where: {
             sale: { retailerId: Number(id) },
             ...(dateFilter ? { createdAt: dateFilter } : {})
           },
           _sum: { units: true }
-        }),
-        prisma.systemConfig.findFirst()
+        })
       ]);
       
       const gasUnits = rewards._sum.units || 0;
@@ -4235,7 +4240,10 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
       for (const order of orders) {
         for (const item of order.orderItems) {
           totalRevenue += (item.price * item.quantity);
-          totalCost += ((item.product.costPrice || 0) * item.quantity);
+          const cost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
+            ? item.product.supplierCost
+            : (item.product.costPrice || 0);
+          totalCost += (cost * item.quantity);
         }
       }
       

@@ -101,17 +101,16 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     let totalRevenue = 0;
     let totalCost = 0;
 
+    const retailerMarkup = (systemConfig as any)?.retailerMarkup || 20;
+
     for (const sale of sales) {
-      // Calculate from sale items to be accurate with cost at time of sale? 
-      // Current schema stores cost in saleItem? No, strictly schema has price. 
-      // We rely on current product cost or if we stored it. 
-      // Ideally SaleItem should convert costPrice. 
-      // For now, using product.costPrice.
       for (const item of sale.saleItems) {
         const revenue = item.price * item.quantity;
-        const cost = (item.product.costPrice || 0) * item.quantity;
+        const cost = item.product.costPrice && item.product.costPrice > 0 
+          ? item.product.costPrice 
+          : item.price / (1 + retailerMarkup / 100);
         totalRevenue += revenue;
-        totalCost += cost;
+        totalCost += (cost * item.quantity);
       }
     }
 
