@@ -1719,20 +1719,30 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           data: { walletBalance: { decrement: totalAmount } }
         });
       } else if (paymentMethod === 'credit') {
-        const credit = await prisma.retailerCredit.findUnique({
-          where: { retailerId: retailerProfile.id }
+        // Validate against active loan principals — same source the frontend displays
+        const activeLoans = await prisma.retailerLoan.findMany({
+          where: { retailerId: retailerProfile.id, status: 'active' }
         });
-        if (!credit || credit.availableCredit < totalAmount) {
+        const totalAvailablePrincipal = activeLoans.reduce((sum, l) => sum + (l.amount || 0), 0);
+
+        if (totalAvailablePrincipal < totalAmount) {
           throw new Error('Insufficient credit limit available');
         }
-        // Update Credit Usage
-        await prisma.retailerCredit.update({
-          where: { id: credit.id },
-          data: {
-            availableCredit: { decrement: totalAmount },
-            usedCredit: { increment: totalAmount }
-          }
-        });
+
+        // Deduct from remaining loan amounts proportionally
+        let remaining = totalAmount;
+        for (const loan of activeLoans) {
+          if (remaining <= 0) break;
+          const deduct = Math.min(loan.amount, remaining);
+          await prisma.retailerLoan.update({
+            where: { id: loan.id },
+            data: {
+              amount: { decrement: deduct },
+              remainingAmount: { decrement: deduct }
+            }
+          });
+          remaining -= deduct;
+        }
       } else if (paymentMethod === 'momo') {
         // ==========================================
         // PALMKASH INTEGRATION
