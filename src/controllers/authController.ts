@@ -160,9 +160,9 @@ export const register = async (req: Request, res: Response) => {
         const { emailQueue } = await import('../queues/email.queue');
         await emailQueue.add('customer-signup-email', {
           to: user.email,
-          templateType: 'sign up', // Maps to user's 'sign up' or 'account creation' email template
+          templateType: 'customer-signup-email', // Mapped to CUS-EMAIL-001
           data: {
-            name: user.name || 'Valued Customer',
+            customer_name: user.name || 'Valued Customer',
             email: user.email,
             customer_id: user.id.toString()
           },
