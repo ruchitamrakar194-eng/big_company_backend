@@ -1454,6 +1454,25 @@ const updateCustomerStatus = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 console.error('[AdminAPI] Failed to trigger customer-account-status notification:', err.message);
             }
         }
+        if (updatedUser && updatedUser.email) {
+            try {
+                const { emailQueue } = yield Promise.resolve().then(() => __importStar(require('../queues/email.queue')));
+                yield emailQueue.add('customer-account-status-email', {
+                    to: updatedUser.email,
+                    templateType: 'customer-account-status-email', // Mapped to CUS-EMAIL-010
+                    data: {
+                        customer_name: updatedUser.name || 'Valued Customer',
+                        status: newStatus ? 'activated' : 'deactivated',
+                        date: new Date().toLocaleDateString(),
+                        reason: newStatus ? 'Account activated or approved' : 'Account deactivated or suspended'
+                    },
+                    relatedEntity: { type: 'USER', id: updatedUser.id.toString() }
+                });
+            }
+            catch (err) {
+                console.error('[AdminAPI] Failed to trigger customer-account-status-email notification:', err.message);
+            }
+        }
         res.json({ success: true, message: `Customer account ${newStatus ? 'activated' : 'deactivated'} successfully` });
     }
     catch (error) {
@@ -1838,6 +1857,7 @@ exports.deleteEmployee = deleteEmployee;
 // LOAN MANAGEMENT
 // ==========================================
 const approveLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const { id } = req.params;
         const numericId = Number(id);
@@ -1881,6 +1901,22 @@ const approveLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     }
                 });
             }
+            // Fetch dynamic interest rates from SystemConfig for Retailer
+            const systemConfig = yield prisma_1.default.systemConfig.findFirst();
+            const interestRate = (_a = systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.retailerLoanInterest) !== null && _a !== void 0 ? _a : 18;
+            const interestAmount = request.amount * (interestRate / 100);
+            const totalRepayable = request.amount + interestAmount;
+            // Create missing RetailerLoan record to show up in retailer portal
+            yield prisma_1.default.retailerLoan.create({
+                data: {
+                    retailerId: request.retailerId,
+                    amount: request.amount,
+                    interestRate,
+                    totalRepayable,
+                    remainingAmount: totalRepayable,
+                    status: 'active'
+                }
+            });
             return res.json({ success: true, loan: { id: numericId, status: 'approved' } });
         }
         const result = yield prisma_1.default.$transaction((prisma) => __awaiter(void 0, void 0, void 0, function* () {
@@ -2356,12 +2392,25 @@ const recalculateAllProductsBackground = (config) => __awaiter(void 0, void 0, v
             const rProdAny = rProduct;
             if (rProduct.costPrice === null || rProduct.costPrice === undefined)
                 continue;
-            const taxType = rProdAny.taxType || 'B';
+            // Find the corresponding wholesaler product robustly to get the correct live taxType
+            const wholesalerProduct = yield prisma_1.default.product.findFirst({
+                where: {
+                    retailerId: null,
+                    wholesalerId: { not: null },
+                    OR: [
+                        rProduct.sku ? { sku: rProduct.sku } : { id: -1 },
+                        rProduct.barcode ? { barcode: rProduct.barcode } : { id: -1 },
+                        { name: rProduct.name }
+                    ]
+                }
+            });
+            const taxType = (wholesalerProduct === null || wholesalerProduct === void 0 ? void 0 : wholesalerProduct.taxType) || rProdAny.taxType || 'B';
             const retailPricing = (0, pricingUtils_1.calculateRetailPrice)(rProduct.costPrice, retailerMarkupPct, taxType, exciseDutyRatePct);
             yield prisma_1.default.product.update({
                 where: { id: rProduct.id },
                 data: {
-                    price: retailPricing.finalConsumerShelfPrice
+                    price: retailPricing.finalConsumerShelfPrice,
+                    taxType: taxType
                 }
             });
             retailUpdatedCount++;
@@ -3238,7 +3287,10 @@ const confirmWholesaleDelivery = (req, res) => __awaiter(void 0, void 0, void 0,
                     }
                     yield tx.product.update({
                         where: { id: existingProduct.id },
-                        data: { stock: { increment: addStock } }
+                        data: {
+                            stock: { increment: addStock },
+                            taxType: item.product.taxType || 'B'
+                        }
                     });
                 }
                 else {
@@ -3450,16 +3502,28 @@ const sendManualEmail = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (targetRecipients.length === 0) {
             return res.status(400).json({ success: false, error: 'No recipients resolved' });
         }
+        // Query names for recipients to dynamically replace placeholders
+        const users = yield prisma_1.default.user.findMany({
+            where: { email: { in: targetRecipients } }
+        });
+        const userMap = new Map(users.map(u => { var _a; return [(_a = u.email) === null || _a === void 0 ? void 0 : _a.toLowerCase(), u]; }));
         // Add each to queue (Requirement 4.2.10)
-        const jobs = targetRecipients.map(email => ({
-            name: 'manual-announcement',
-            data: {
-                to: email,
-                subject,
-                html,
-                templateType: category || 'ANNOUNCEMENT'
-            }
-        }));
+        const jobs = targetRecipients.map(email => {
+            const u = userMap.get(email.toLowerCase());
+            const name = (u === null || u === void 0 ? void 0 : u.name) || 'Valued Customer';
+            const namePlaceholderRegex = /{{(customer_name|retail_name|wholesaler_name|name)}}/g;
+            const finalHtml = html.replace(namePlaceholderRegex, name);
+            const finalSubject = subject.replace(namePlaceholderRegex, name);
+            return {
+                name: 'manual-announcement',
+                data: {
+                    to: email,
+                    subject: finalSubject,
+                    html: finalHtml,
+                    templateType: category || 'ANNOUNCEMENT'
+                }
+            };
+        });
         yield email_queue_1.emailQueue.addBulk(jobs);
         res.json({ success: true, message: `Queued ${targetRecipients.length} emails successfully` });
     }
@@ -3635,6 +3699,7 @@ const getRefundRequests = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.getRefundRequests = getRefundRequests;
 const processRefundRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
         const { id } = req.params;
         const { action, reason } = req.body; // action: 'approve' or 'reject'
@@ -3643,7 +3708,7 @@ const processRefundRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
         }
         const transaction = yield prisma_1.default.walletTransaction.findUnique({
             where: { id: Number(id) },
-            include: { wallet: { include: { consumerProfile: true } } }
+            include: { wallet: { include: { consumerProfile: { include: { user: true } } } } }
         });
         if (!transaction) {
             return res.status(404).json({ success: false, error: 'Refund request not found' });
@@ -3688,6 +3753,26 @@ const processRefundRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 }
             }
         }));
+        // Trigger Customer Refund Notification (CUS-EMAIL-009)
+        try {
+            if ((_c = (_b = (_a = transaction.wallet) === null || _a === void 0 ? void 0 : _a.consumerProfile) === null || _b === void 0 ? void 0 : _b.user) === null || _c === void 0 ? void 0 : _c.email) {
+                const { emailQueue } = yield Promise.resolve().then(() => __importStar(require('../queues/email.queue')));
+                yield emailQueue.add('customer-refund-request-email', {
+                    to: transaction.wallet.consumerProfile.user.email,
+                    templateType: 'customer-refund-request-email', // Mapped to CUS-EMAIL-009
+                    data: {
+                        customer_name: transaction.wallet.consumerProfile.fullName || transaction.wallet.consumerProfile.user.name || 'Customer',
+                        amount: transaction.amount.toLocaleString(),
+                        status: action === 'approve' ? 'Approved & Refunded' : 'Rejected',
+                        date: new Date().toLocaleDateString()
+                    },
+                    relatedEntity: { type: 'WALLET_TRANSACTION', id: transaction.id.toString() }
+                });
+            }
+        }
+        catch (err) {
+            console.error('Customer refund notification failed:', err);
+        }
         res.json({ success: true, message: `Refund request ${action}d successfully` });
     }
     catch (error) {
@@ -3801,18 +3886,22 @@ const getProfitInvoiceStats = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 where: Object.assign({ retailerId: Number(id), status: { not: 'cancelled' } }, (dateFilter ? { createdAt: dateFilter } : {})),
                 include: { saleItems: { include: { product: true } } }
             });
+            const systemConfig = yield prisma_1.default.systemConfig.findFirst();
+            const retailerMarkup = (systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.retailerMarkup) || 20;
             for (const sale of sales) {
                 for (const item of sale.saleItems) {
                     totalRevenue += (item.price * item.quantity);
-                    totalCost += ((item.product.costPrice || 0) * item.quantity);
+                    const cost = item.product.costPrice && item.product.costPrice > 0
+                        ? item.product.costPrice
+                        : item.price / (1 + retailerMarkup / 100);
+                    totalCost += (cost * item.quantity);
                 }
             }
-            const [rewards, systemConfig] = yield Promise.all([
+            const [rewards] = yield Promise.all([
                 prisma_1.default.gasReward.aggregate({
                     where: Object.assign({ sale: { retailerId: Number(id) } }, (dateFilter ? { createdAt: dateFilter } : {})),
                     _sum: { units: true }
-                }),
-                prisma_1.default.systemConfig.findFirst()
+                })
             ]);
             const gasUnits = rewards._sum.units || 0;
             const gasPrice = (systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.gasPricePerM3) || 6500;
@@ -3838,7 +3927,10 @@ const getProfitInvoiceStats = (req, res) => __awaiter(void 0, void 0, void 0, fu
             for (const order of orders) {
                 for (const item of order.orderItems) {
                     totalRevenue += (item.price * item.quantity);
-                    totalCost += ((item.product.costPrice || 0) * item.quantity);
+                    const cost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
+                        ? item.product.supplierCost
+                        : (item.product.costPrice || 0);
+                    totalCost += (cost * item.quantity);
                 }
             }
             res.json({

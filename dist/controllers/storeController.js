@@ -59,7 +59,7 @@ const template_service_1 = require("../services/template.service");
 // UPDATED: Reward Gas can now be applied as partial discount during payment
 // REQUIREMENT #3: Customer must be linked to retailer before ordering
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f;
     const fs = require('fs');
     const path = require('path');
     const os = require('os');
@@ -383,7 +383,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 }
                 const config = yield prisma_1.default.systemConfig.findFirst();
                 const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || 6500;
-                const rewardAmountRWF = totalProfit * 0.12;
+                const gasRewardShare = (config === null || config === void 0 ? void 0 : config.gasRewardShare) !== undefined ? config.gasRewardShare / 100 : 0.12;
+                const rewardAmountRWF = totalProfit * gasRewardShare;
                 // Convert to gas units where 1 m³ = gasPrice RWF, rounded to 4 decimal places
                 const rewardUnits = Number((rewardAmountRWF / gasPrice).toFixed(4));
                 if (rewardUnits > 0) {
@@ -443,6 +444,49 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     templateType: 'RETAILER_ORDER_CONFIRMATION',
                     relatedEntity: { type: 'SALE', id: result.id.toString() }
                 });
+            }
+            // 3. Notify Consumer of Gas Rewards (CUS-SMS-006 / CUS-EMAIL-006)
+            if (result.consumerId) {
+                const gasRewardObj = yield prisma_1.default.gasReward.findFirst({
+                    where: { saleId: result.id, units: { gt: 0 } }
+                });
+                if (gasRewardObj) {
+                    const rewardUnits = gasRewardObj.units;
+                    const rewardConsumer = yield prisma_1.default.consumerProfile.findUnique({
+                        where: { id: result.consumerId },
+                        include: { user: true }
+                    });
+                    if (rewardConsumer) {
+                        const allRewards = yield prisma_1.default.gasReward.findMany({
+                            where: { consumerId: result.consumerId }
+                        });
+                        const totalUnits = allRewards.reduce((sum, r) => sum + r.units, 0);
+                        if ((_e = rewardConsumer.user) === null || _e === void 0 ? void 0 : _e.phone) {
+                            yield email_queue_1.emailQueue.add('gas-reward-update', {
+                                to: rewardConsumer.user.phone,
+                                templateType: 'gas-reward-update', // Mapped to CUS-SMS-006
+                                data: {
+                                    customer_name: rewardConsumer.fullName || rewardConsumer.user.name || 'Customer',
+                                    reward_amount: rewardUnits.toString(),
+                                    new_reward_balance: totalUnits.toFixed(4)
+                                },
+                                relatedEntity: { type: 'GAS_REWARD', id: result.id.toString() }
+                            });
+                        }
+                        if ((_f = rewardConsumer.user) === null || _f === void 0 ? void 0 : _f.email) {
+                            yield email_queue_1.emailQueue.add('customer-reward-update-email', {
+                                to: rewardConsumer.user.email,
+                                templateType: 'customer-reward-update-email', // Mapped to CUS-EMAIL-006
+                                data: {
+                                    customer_name: rewardConsumer.fullName || rewardConsumer.user.name || 'Customer',
+                                    reward_amount: rewardUnits.toString(),
+                                    new_reward_balance: totalUnits.toFixed(4)
+                                },
+                                relatedEntity: { type: 'GAS_REWARD', id: result.id.toString() }
+                            });
+                        }
+                    }
+                }
             }
         }
         catch (triggerError) {
@@ -874,7 +918,7 @@ const cancelOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 });
 exports.cancelOrder = cancelOrder;
 const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d;
     try {
         const { id } = req.params;
         const userId = req.user.id;
@@ -908,19 +952,34 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
                 where: { id: updatedSale.consumerId },
                 include: { user: true }
             });
-            if ((_a = consumer === null || consumer === void 0 ? void 0 : consumer.user) === null || _a === void 0 ? void 0 : _a.phone) {
+            if (((_a = consumer === null || consumer === void 0 ? void 0 : consumer.user) === null || _a === void 0 ? void 0 : _a.phone) || ((_b = consumer === null || consumer === void 0 ? void 0 : consumer.user) === null || _b === void 0 ? void 0 : _b.email)) {
                 const { emailQueue } = yield Promise.resolve().then(() => __importStar(require('../queues/email.queue')));
-                yield emailQueue.add('order-delivered-sms', {
-                    to: consumer.user.phone,
-                    templateType: 'order-delivered-sms', // Mapped to CUS-SMS-002
-                    data: {
-                        customer_name: consumer.fullName || consumer.user.name || 'Customer',
-                        order_id: updatedSale.id.toString(),
-                        amount: updatedSale.totalAmount.toLocaleString(),
-                        delivery_date: new Date().toLocaleDateString()
-                    },
-                    relatedEntity: { type: 'SALE', id: updatedSale.id.toString() }
-                });
+                if ((_c = consumer === null || consumer === void 0 ? void 0 : consumer.user) === null || _c === void 0 ? void 0 : _c.phone) {
+                    yield emailQueue.add('order-delivered-sms', {
+                        to: consumer.user.phone,
+                        templateType: 'order-delivered-sms', // Mapped to CUS-SMS-002
+                        data: {
+                            customer_name: consumer.fullName || consumer.user.name || 'Customer',
+                            order_id: updatedSale.id.toString(),
+                            amount: updatedSale.totalAmount.toLocaleString(),
+                            delivery_date: new Date().toLocaleDateString()
+                        },
+                        relatedEntity: { type: 'SALE', id: updatedSale.id.toString() }
+                    });
+                }
+                if ((_d = consumer === null || consumer === void 0 ? void 0 : consumer.user) === null || _d === void 0 ? void 0 : _d.email) {
+                    yield emailQueue.add('customer-order-delivered-email', {
+                        to: consumer.user.email,
+                        templateType: 'customer-order-delivered-email', // Mapped to CUS-EMAIL-002
+                        data: {
+                            customer_name: consumer.fullName || consumer.user.name || 'Customer',
+                            order_id: updatedSale.id.toString(),
+                            amount: updatedSale.totalAmount.toLocaleString(),
+                            delivery_date: new Date().toLocaleDateString()
+                        },
+                        relatedEntity: { type: 'SALE', id: updatedSale.id.toString() }
+                    });
+                }
             }
         }
         catch (err) {
@@ -972,6 +1031,7 @@ const getRewardsBalance = (req, res) => __awaiter(void 0, void 0, void 0, functi
 exports.getRewardsBalance = getRewardsBalance;
 // Get loans
 const getLoans = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
         const consumerProfile = yield prisma_1.default.consumerProfile.findUnique({
             where: { userId: req.user.id }
@@ -980,16 +1040,12 @@ const getLoans = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             return res.status(404).json({ error: 'Consumer profile not found' });
         }
         // Read interest rates (matching admin controller logic)
-        let rates = { customerInterestRate: 10, retailerInterestRate: 5, wholesalerInterestRate: 8 };
-        try {
-            const fs = require('fs');
-            const path = require('path');
-            const p = path.join(__dirname, '..', 'customRates.json');
-            if (fs.existsSync(p)) {
-                rates = Object.assign(Object.assign({}, rates), JSON.parse(fs.readFileSync(p, 'utf8')));
-            }
-        }
-        catch (e) { }
+        const config = yield prisma_1.default.systemConfig.findFirst();
+        const rates = {
+            customerInterestRate: (_a = config === null || config === void 0 ? void 0 : config.customerLoanInterest) !== null && _a !== void 0 ? _a : 10,
+            retailerInterestRate: (_b = config === null || config === void 0 ? void 0 : config.retailerLoanInterest) !== null && _b !== void 0 ? _b : 0,
+            wholesalerInterestRate: (_c = config === null || config === void 0 ? void 0 : config.wholesalerLoanInterest) !== null && _c !== void 0 ? _c : 8
+        };
         const loansRaw = yield prisma_1.default.loan.findMany({
             where: { consumerId: consumerProfile.id },
             orderBy: { createdAt: 'desc' }
@@ -1125,7 +1181,7 @@ const applyForLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.applyForLoan = applyForLoan;
 // Repay loan
 const repayLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d;
     try {
         const { id } = req.params;
         const { amount, payment_method } = req.body;
@@ -1172,17 +1228,13 @@ const repayLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 return res.status(400).json({ error: 'Insufficient credit wallet balance.' });
             }
         }
-        // Load custom rates outside the transaction to avoid blocking I/O operations inside DB transaction
-        let rates = { customerInterestRate: 10, retailerInterestRate: 5, wholesalerInterestRate: 8 };
-        try {
-            const fs = require('fs');
-            const path = require('path');
-            const p = path.join(__dirname, '..', 'customRates.json');
-            if (fs.existsSync(p)) {
-                rates = Object.assign(Object.assign({}, rates), JSON.parse(fs.readFileSync(p, 'utf8')));
-            }
-        }
-        catch (e) { }
+        // Load dynamic rates from SystemConfig table
+        const config = yield prisma_1.default.systemConfig.findFirst();
+        const rates = {
+            customerInterestRate: (_b = config === null || config === void 0 ? void 0 : config.customerLoanInterest) !== null && _b !== void 0 ? _b : 10,
+            retailerInterestRate: (_c = config === null || config === void 0 ? void 0 : config.retailerLoanInterest) !== null && _c !== void 0 ? _c : 0,
+            wholesalerInterestRate: (_d = config === null || config === void 0 ? void 0 : config.wholesalerLoanInterest) !== null && _d !== void 0 ? _d : 8
+        };
         yield prisma_1.default.$transaction((prisma) => __awaiter(void 0, void 0, void 0, function* () {
             // Find the loan (ensure ID is number)
             const loan = yield prisma.loan.findUnique({ where: { id: Number(id) } });
@@ -1284,7 +1336,7 @@ const repayLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.repayLoan = repayLoan;
 const getActiveLoanLedger = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const consumerProfile = yield prisma_1.default.consumerProfile.findUnique({
             where: { userId: req.user.id }
@@ -1307,17 +1359,8 @@ const getActiveLoanLedger = (req, res) => __awaiter(void 0, void 0, void 0, func
             where: { reference: loan.id.toString(), type: 'loan_repayment_replenish' }
         });
         const paidAmount = repayments.reduce((sum, t) => sum + t.amount, 0);
-        let rates = {};
-        try {
-            const fs = require('fs');
-            const path = require('path');
-            const p = path.join(process.cwd(), 'data', 'system_rates.json');
-            if (fs.existsSync(p)) {
-                rates = JSON.parse(fs.readFileSync(p, 'utf8'));
-            }
-        }
-        catch (e) { }
-        const interestRate = Number(rates.customerInterestRate) || 10;
+        const config = yield prisma_1.default.systemConfig.findFirst();
+        const interestRate = (_a = config === null || config === void 0 ? void 0 : config.customerLoanInterest) !== null && _a !== void 0 ? _a : 10;
         const interestAmount = Math.round(loan.amount * (interestRate / 100));
         const totalAmount = loan.amount + interestAmount;
         const outstandingBalance = Math.max(0, totalAmount - paidAmount);
@@ -1367,7 +1410,7 @@ const getActiveLoanLedger = (req, res) => __awaiter(void 0, void 0, void 0, func
             total_amount: totalAmount,
             outstanding_balance: outstandingBalance,
             paid_amount: paidAmount,
-            next_payment_date: (nextPayment === null || nextPayment === void 0 ? void 0 : nextPayment.due_date) || ((_a = loan.dueDate) === null || _a === void 0 ? void 0 : _a.toISOString()),
+            next_payment_date: (nextPayment === null || nextPayment === void 0 ? void 0 : nextPayment.due_date) || ((_b = loan.dueDate) === null || _b === void 0 ? void 0 : _b.toISOString()),
             next_payment_amount: (nextPayment === null || nextPayment === void 0 ? void 0 : nextPayment.amount) || 0,
             status: loan.status === 'approved' ? 'active' : loan.status,
             payment_schedule: schedule

@@ -511,13 +511,10 @@ const approveCreditRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
                     status: 'active'
                 }
             });
-            // Add the approved loan principal amount directly to the retailer's cash wallet balance
-            yield tx.retailerProfile.update({
-                where: { id: creditRequest.retailerId },
-                data: {
-                    walletBalance: { increment: creditRequest.amount }
-                }
-            });
+            // NOTE: The approved loan amount is NOT added to the Capital Wallet.
+            // It is a credit facility tracked in RetailerLoan only.
+            // The retailer repays the full amount (principal + interest) via Loan Repayment.
+            // Capital Wallet is only topped up via explicit "Add Capital" deposits.
             // Ensure retailerCredit record exists to prevent query joins from failing
             yield tx.retailerCredit.upsert({
                 where: { retailerId: creditRequest.retailerId },

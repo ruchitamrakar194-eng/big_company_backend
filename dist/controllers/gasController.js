@@ -59,7 +59,8 @@ const getGasConfig = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             data: {
                 price_per_m3: gasPrice,
                 min_topup: (config === null || config === void 0 ? void 0 : config.minGasTopup) || 500,
-                max_topup: (config === null || config === void 0 ? void 0 : config.maxGasTopup) || 100000
+                max_topup: (config === null || config === void 0 ? void 0 : config.maxGasTopup) || 100000,
+                gas_reward_share: (config === null || config === void 0 ? void 0 : config.gasRewardShare) || 12
             }
         });
     }
@@ -463,12 +464,11 @@ const topupGas = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             });
             // Trigger Email (if email exists)
             if (consumerProfile.user.email) {
-                yield emailQueue.add('gas-recharge-success-email', {
+                yield emailQueue.add('customer-gas-recharge-email', {
                     to: consumerProfile.user.email,
-                    templateType: 'gas top-up', // Mapped to user's 'gas top-up' template
+                    templateType: 'customer-gas-recharge-email', // Mapped to CUS-EMAIL-004
                     data: {
-                        name: consumerProfile.fullName || consumerProfile.user.name || 'Valued Customer',
-                        email: consumerProfile.user.email,
+                        customer_name: consumerProfile.fullName || consumerProfile.user.name || 'Valued Customer',
                         meter_name: meter.aliasName || 'Meter',
                         meter_id: meter_number,
                         amount: amount.toLocaleString(),

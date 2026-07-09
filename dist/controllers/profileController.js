@@ -52,9 +52,9 @@ const getWholesalerProfile = (req, res) => __awaiter(void 0, void 0, void 0, fun
 });
 exports.getWholesalerProfile = getWholesalerProfile;
 const updateWholesalerProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
-        const { name, company_name, contact_person, email, address, tin_number } = req.body;
+        const { name, company_name, contact_person, email, phone, address, tin_number } = req.body;
         console.log('✏️ Updating wholesaler profile:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.id);
         const profile = yield prisma_1.default.wholesalerProfile.findUnique({
             where: { userId: req.user.id }
@@ -62,11 +62,11 @@ const updateWholesalerProfile = (req, res) => __awaiter(void 0, void 0, void 0, 
         if (!profile) {
             return res.status(404).json({ error: 'Wholesaler profile not found' });
         }
-        // Update User's name if provided
-        if (name) {
+        // Update User's details if provided
+        if (name || phone || email) {
             yield prisma_1.default.user.update({
                 where: { id: req.user.id },
-                data: { name }
+                data: Object.assign(Object.assign(Object.assign({}, (name && { name })), (phone && { phone })), (email && { email }))
             });
         }
         // Update WholesalerProfile
@@ -92,6 +92,17 @@ const updateWholesalerProfile = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
     catch (error) {
         console.error('❌ Error updating profile:', error);
+        if (error.code === 'P2002') {
+            const target = ((_b = error.meta) === null || _b === void 0 ? void 0 : _b.target) || '';
+            let msg = 'A record with this value already exists.';
+            if (target.includes('phone')) {
+                msg = 'This phone number is already registered to another account.';
+            }
+            else if (target.includes('email')) {
+                msg = 'This email address is already registered to another account.';
+            }
+            return res.status(400).json({ error: msg });
+        }
         res.status(500).json({ error: error.message });
     }
 });

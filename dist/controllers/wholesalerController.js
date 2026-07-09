@@ -68,11 +68,12 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
+        const dateFilter = wholesalerProfile.lastSettlementDate ? { gte: wholesalerProfile.lastSettlementDate } : undefined;
         // Fetch all necessary data in parallel
-        const [allOrders, todayOrders, allProducts, pendingCreditRequests] = yield Promise.all([
-            // All orders for total revenue
+        const [allOrders, todayOrders, allProducts, pendingCreditRequests, systemConfig] = yield Promise.all([
+            // All orders for total revenue (filtered by lastSettlementDate if set)
             prisma_1.default.order.findMany({
-                where: { wholesalerId: wholesalerProfile.id },
+                where: Object.assign({ wholesalerId: wholesalerProfile.id }, (dateFilter ? { createdAt: dateFilter } : {})),
                 include: {
                     retailerProfile: {
                         include: { user: true }
@@ -105,8 +106,10 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
                     },
                     status: 'pending'
                 }
-            })
+            }),
+            prisma_1.default.systemConfig.findFirst()
         ]);
+        const wholesalerMarkupPct = (systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.wholesalerMarkup) || 20;
         // Calculate today's stats (excluding cancelled or rejected orders)
         const activeTodayOrders = todayOrders.filter(o => o.status !== 'cancelled' && o.status !== 'rejected');
         const todayOrdersCount = activeTodayOrders.length;
@@ -114,10 +117,12 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         // Calculate total revenue (only delivered orders)
         const totalRevenue = allOrders.filter(o => o.status === 'delivered').reduce((sum, order) => sum + order.totalAmount, 0);
         // Calculate inventory values
-        const inventoryValueWallet = allProducts.reduce((sum, p) => sum + (p.stock * (p.costPrice || 0)), 0);
+        const inventoryValueWallet = allProducts.reduce((sum, p) => sum + (p.stock * (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0))), 0);
         const stockValueWholesaler = allProducts.reduce((sum, p) => sum + (p.stock * p.price), 0);
-        // Count pending orders
-        const pendingOrdersCount = allOrders.filter(o => o.status === 'pending').length;
+        // Count pending orders (not limited by settlement date so they don't disappear)
+        const pendingOrdersCount = yield prisma_1.default.order.count({
+            where: { wholesalerId: wholesalerProfile.id, status: 'pending' }
+        });
         // Count pending credit requests
         const pendingCreditRequestsCount = pendingCreditRequests.length;
         // Get dates for 7-day trend
@@ -127,10 +132,10 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             d.setHours(0, 0, 0, 0);
             return d;
         }).reverse();
-        // Fetch order items for top products
+        // Fetch order items for top products (filtered by lastSettlementDate if set)
         const orderItems = yield prisma_1.default.orderItem.findMany({
             where: {
-                order: { wholesalerId: wholesalerProfile.id }
+                order: Object.assign({ wholesalerId: wholesalerProfile.id }, (dateFilter ? { createdAt: dateFilter } : {}))
             },
             include: { product: true }
         });
@@ -139,7 +144,13 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             const order = allOrders.find(o => o.id === item.orderId);
             return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
         });
-        const profitWallet = confirmedOrderItems.reduce((sum, item) => sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0);
+        const profitWallet = confirmedOrderItems.reduce((sum, item) => {
+            const rawCost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
+                ? item.product.supplierCost
+                : (item.product.costPrice || 0);
+            const cost = rawCost > 0 ? rawCost : item.price / (1 + wholesalerMarkupPct / 100);
+            return sum + (item.quantity * (item.price - cost));
+        }, 0);
         // Calculate top products
         const productStatsMap = {};
         orderItems.forEach(item => {
@@ -295,12 +306,15 @@ const getInventoryStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const lowStockCount = products.filter(p => p.lowStockThreshold && p.stock > 0 && p.stock <= p.lowStockThreshold).length;
         const outOfStockCount = products.filter(p => p.stock === 0).length;
         // Calculate realized profit (profit wallet) from confirmed sales/revenue
+        const dateFilter = wholesalerProfile.lastSettlementDate ? { gte: wholesalerProfile.lastSettlementDate } : undefined;
+        const systemConfig = yield prisma_1.default.systemConfig.findFirst();
+        const wholesalerMarkupPct = (systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.wholesalerMarkup) || 20;
         const orders = yield prisma_1.default.order.findMany({
-            where: { wholesalerId: wholesalerProfile.id }
+            where: Object.assign({ wholesalerId: wholesalerProfile.id }, (dateFilter ? { createdAt: dateFilter } : {}))
         });
         const orderItems = yield prisma_1.default.orderItem.findMany({
             where: {
-                order: { wholesalerId: wholesalerProfile.id }
+                order: Object.assign({ wholesalerId: wholesalerProfile.id }, (dateFilter ? { createdAt: dateFilter } : {}))
             },
             include: { product: true }
         });
@@ -308,7 +322,13 @@ const getInventoryStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             const order = orders.find(o => o.id === item.orderId);
             return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
         });
-        const realizedProfit = confirmedOrderItems.reduce((sum, item) => sum + (item.quantity * (item.price - (item.product.costPrice || 0))), 0);
+        const realizedProfit = confirmedOrderItems.reduce((sum, item) => {
+            const rawCost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
+                ? item.product.supplierCost
+                : (item.product.costPrice || 0);
+            const cost = rawCost > 0 ? rawCost : item.price / (1 + wholesalerMarkupPct / 100);
+            return sum + (item.quantity * (item.price - cost));
+        }, 0);
         res.json({
             totalProducts,
             stockValueSupplier,
@@ -1148,7 +1168,8 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
                         where: { id: existingProduct.id },
                         data: {
                             stock: { increment: addStock },
-                            status: 'active'
+                            status: 'active',
+                            taxType: item.product.taxType || 'B'
                         }
                     });
                 }

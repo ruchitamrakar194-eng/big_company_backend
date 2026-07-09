@@ -199,9 +199,9 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 const { emailQueue } = yield Promise.resolve().then(() => __importStar(require('../queues/email.queue')));
                 yield emailQueue.add('customer-signup-email', {
                     to: user.email,
-                    templateType: 'sign up', // Maps to user's 'sign up' or 'account creation' email template
+                    templateType: 'customer-signup-email', // Mapped to CUS-EMAIL-001
                     data: {
-                        name: user.name || 'Valued Customer',
+                        customer_name: user.name || 'Valued Customer',
                         email: user.email,
                         customer_id: user.id.toString()
                     },
@@ -289,11 +289,11 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         }
         if (!valid) {
             if (user.role === 'consumer' && user.email) {
-                yield email_queue_1.emailQueue.add('failed-login-alert', {
+                yield email_queue_1.emailQueue.add('customer-failed-login-email', {
                     to: user.email,
-                    templateType: 'login attempt',
+                    templateType: 'customer-failed-login-email', // Mapped to CUS-EMAIL-008
                     data: {
-                        name: user.name || 'Customer',
+                        customer_name: user.name || 'Customer',
                         attempt_time: new Date().toLocaleString(),
                         device: req.headers['user-agent'] || 'Unknown Device',
                         ip: req.ip || 'Unknown'
@@ -545,17 +545,30 @@ const updatePassword = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 relatedEntity: { type: 'USER', id: user.id.toString() }
             });
         }
-        // Notify Consumer of Security Update (CUS-SMS-007)
-        if (user.role === 'consumer' && user.phone) {
-            yield email_queue_1.emailQueue.add('customer-security-update', {
-                to: user.phone,
-                templateType: 'customer-security-update', // Mapped to CUS-SMS-007
-                data: {
-                    customer_name: user.name || 'Valued Customer',
-                    change_time: new Date().toLocaleString()
-                },
-                relatedEntity: { type: 'USER', id: user.id.toString() }
-            });
+        // Notify Consumer of Security Update (CUS-SMS-007 / CUS-EMAIL-007)
+        if (user.role === 'consumer') {
+            if (user.phone) {
+                yield email_queue_1.emailQueue.add('customer-security-update', {
+                    to: user.phone,
+                    templateType: 'customer-security-update', // Mapped to CUS-SMS-007
+                    data: {
+                        customer_name: user.name || 'Valued Customer',
+                        change_time: new Date().toLocaleString()
+                    },
+                    relatedEntity: { type: 'USER', id: user.id.toString() }
+                });
+            }
+            if (user.email) {
+                yield email_queue_1.emailQueue.add('customer-security-update-email', {
+                    to: user.email,
+                    templateType: 'customer-security-update-email', // Mapped to CUS-EMAIL-007
+                    data: {
+                        customer_name: user.name || 'Valued Customer',
+                        change_time: new Date().toLocaleString()
+                    },
+                    relatedEntity: { type: 'USER', id: user.id.toString() }
+                });
+            }
         }
         const newToken = (0, auth_1.generateToken)({ id: user.id, role: user.role, require_password_reset: false });
         res.json({ success: true, message: 'Password updated successfully', access_token: newToken });
@@ -610,17 +623,30 @@ const updatePin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 relatedEntity: { type: 'USER', id: user.id.toString() }
             });
         }
-        // Notify Consumer of Security Update (CUS-SMS-007)
-        if (user.role === 'consumer' && user.phone) {
-            yield email_queue_1.emailQueue.add('customer-security-update', {
-                to: user.phone,
-                templateType: 'customer-security-update', // Mapped to CUS-SMS-007
-                data: {
-                    customer_name: user.name || 'Valued Customer',
-                    change_time: new Date().toLocaleString()
-                },
-                relatedEntity: { type: 'USER', id: user.id.toString() }
-            });
+        // Notify Consumer of Security Update (CUS-SMS-007 / CUS-EMAIL-007)
+        if (user.role === 'consumer') {
+            if (user.phone) {
+                yield email_queue_1.emailQueue.add('customer-security-update', {
+                    to: user.phone,
+                    templateType: 'customer-security-update', // Mapped to CUS-SMS-007
+                    data: {
+                        customer_name: user.name || 'Valued Customer',
+                        change_time: new Date().toLocaleString()
+                    },
+                    relatedEntity: { type: 'USER', id: user.id.toString() }
+                });
+            }
+            if (user.email) {
+                yield email_queue_1.emailQueue.add('customer-security-update-email', {
+                    to: user.email,
+                    templateType: 'customer-security-update-email', // Mapped to CUS-EMAIL-007
+                    data: {
+                        customer_name: user.name || 'Valued Customer',
+                        change_time: new Date().toLocaleString()
+                    },
+                    relatedEntity: { type: 'USER', id: user.id.toString() }
+                });
+            }
         }
         const newToken = (0, auth_1.generateToken)({ id: user.id, role: user.role, require_password_reset: false });
         res.json({ success: true, message: 'PIN updated successfully', access_token: newToken });

@@ -121,17 +121,15 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         });
         let totalRevenue = 0;
         let totalCost = 0;
+        const retailerMarkup = (systemConfig === null || systemConfig === void 0 ? void 0 : systemConfig.retailerMarkup) || 20;
         for (const sale of sales) {
-            // Calculate from sale items to be accurate with cost at time of sale? 
-            // Current schema stores cost in saleItem? No, strictly schema has price. 
-            // We rely on current product cost or if we stored it. 
-            // Ideally SaleItem should convert costPrice. 
-            // For now, using product.costPrice.
             for (const item of sale.saleItems) {
                 const revenue = item.price * item.quantity;
-                const cost = (item.product.costPrice || 0) * item.quantity;
+                const cost = item.product.costPrice && item.product.costPrice > 0
+                    ? item.product.costPrice
+                    : item.price / (1 + retailerMarkup / 100);
                 totalRevenue += revenue;
-                totalCost += cost;
+                totalCost += (cost * item.quantity);
             }
         }
         const totalProfit = totalRevenue - totalCost;
@@ -1076,7 +1074,8 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 if (totalProfit > 0) {
                     const config = yield prisma.systemConfig.findFirst();
                     const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || 6500;
-                    const rewardAmountRWF = totalProfit * 0.12; // 12% of profit
+                    const gasRewardShare = (config === null || config === void 0 ? void 0 : config.gasRewardShare) !== undefined ? config.gasRewardShare / 100 : 0.12;
+                    const rewardAmountRWF = totalProfit * gasRewardShare; // Use configured share of profit
                     const rewardUnits = Number((rewardAmountRWF / gasPrice).toFixed(4));
                     yield prisma.gasReward.create({
                         data: {
@@ -1568,20 +1567,27 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 });
             }
             else if (paymentMethod === 'credit') {
-                const credit = yield prisma.retailerCredit.findUnique({
-                    where: { retailerId: retailerProfile.id }
+                // Credit line persists even after repayment — check amount > 0, not just active status
+                const loansWithCredit = yield prisma.retailerLoan.findMany({
+                    where: { retailerId: retailerProfile.id, amount: { gt: 0 } }
                 });
-                if (!credit || credit.availableCredit < totalAmount) {
+                const totalSpendableCredit = loansWithCredit.reduce((sum, l) => sum + (l.amount || 0), 0);
+                if (totalSpendableCredit < totalAmount) {
                     throw new Error('Insufficient credit limit available');
                 }
-                // Update Credit Usage
-                yield prisma.retailerCredit.update({
-                    where: { id: credit.id },
-                    data: {
-                        availableCredit: { decrement: totalAmount },
-                        usedCredit: { increment: totalAmount }
-                    }
-                });
+                // Deduct from amount (spendable credit) — NOT remainingAmount
+                let remaining = totalAmount;
+                for (const loan of loansWithCredit) {
+                    if (remaining <= 0)
+                        break;
+                    const deduct = Math.min(loan.amount, remaining);
+                    yield prisma.retailerLoan.update({
+                        where: { id: loan.id },
+                        data: { amount: loan.amount - deduct }
+                        // remainingAmount is ONLY touched during repayment
+                    });
+                    remaining -= deduct;
+                }
             }
             else if (paymentMethod === 'momo') {
                 // ==========================================
@@ -2284,6 +2290,7 @@ const getProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 exports.getProfile = getProfile;
 // Update Retailer Profile
 const updateProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const userId = Number(req.user.id);
         const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
@@ -2318,6 +2325,17 @@ const updateProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
     catch (error) {
         console.error('Error updating profile:', error);
+        if (error.code === 'P2002') {
+            const target = ((_a = error.meta) === null || _a === void 0 ? void 0 : _a.target) || '';
+            let msg = 'A record with this value already exists.';
+            if (target.includes('phone')) {
+                msg = 'This phone number is already registered to another account.';
+            }
+            else if (target.includes('email')) {
+                msg = 'This email address is already registered to another account.';
+            }
+            return res.status(400).json({ error: msg });
+        }
         res.status(500).json({ error: error.message });
     }
 });

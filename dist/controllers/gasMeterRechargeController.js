@@ -472,10 +472,32 @@ const initiateGasMeterRecharge = (req, res) => __awaiter(void 0, void 0, void 0,
                     },
                     relatedEntity: { type: 'GAS_RECHARGE', id: String(txRecord.id) }
                 });
+                // Trigger Email (if email exists on the consumer user profile)
+                if (consumerProfileId) {
+                    const consumer = yield prisma_1.default.consumerProfile.findUnique({
+                        where: { id: consumerProfileId },
+                        include: { user: true }
+                    });
+                    if (consumer && consumer.user.email) {
+                        yield emailQueue.add('customer-gas-recharge-email', {
+                            to: consumer.user.email,
+                            templateType: 'customer-gas-recharge-email', // Mapped to CUS-EMAIL-004
+                            data: {
+                                customer_name: customerName,
+                                meter_name: resolvedMeterName,
+                                meter_id: meterNumber,
+                                amount: totalMoneyAmount.toLocaleString(),
+                                token: apiResult.token || 'N/A',
+                                transaction_id: String(txRecord.id)
+                            },
+                            relatedEntity: { type: 'GAS_RECHARGE', id: String(txRecord.id) }
+                        });
+                    }
+                }
             }
         }
         catch (smsErr) {
-            console.error('[GasRecharge] Failed to dispatch SMS token:', smsErr.message);
+            console.error('[GasRecharge] Failed to dispatch SMS/Email notifications:', smsErr.message);
         }
     }
     if (!isFullySuccessful) {

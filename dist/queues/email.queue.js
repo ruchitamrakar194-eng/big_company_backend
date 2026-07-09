@@ -161,6 +161,11 @@ exports.emailWorker = new bullmq_1.Worker('email-queue', (job) => __awaiter(void
                     console.log(`[EmailWorker] Resolved phone to email: ${finalTo}`);
                 }
             }
+            // Wrap manual/announcement HTML inside the template layout if it doesn't already have HTML boilerplate
+            if (finalHtml && !finalHtml.includes('<!DOCTYPE') && !finalHtml.includes('<html')) {
+                const { TemplateService } = yield Promise.resolve().then(() => __importStar(require('../services/template.service')));
+                finalHtml = TemplateService.wrap(finalHtml);
+            }
             // Send the email and pass the logId to track retries on the same record
             const result = yield email_service_1.EmailService.sendEmail(finalTo, finalSubject, finalHtml, templateType || 'MANUAL_EMAIL', relatedEntity, logId);
             // If this was the first attempt, save the logId to job data for future retries
