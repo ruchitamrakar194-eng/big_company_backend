@@ -122,6 +122,22 @@ export class TemplateService {
           subject: `✅ Order Confirmation: #${data.orderNumber}`,
           html: this.getOrderConfirmationTemplate(data.orderNumber, data.quantity, data.totalAmount)
         };
+      case 'customer-gas-recharge-email':
+      case 'CUS-EMAIL-004':
+        return {
+          subject: 'Gas Meter Recharge Receipt',
+          html: this.wrap(`
+            <h2>Gas Meter Recharge Confirmation</h2>
+            <p>Hello <strong>${data.customer_name || 'Customer'}</strong>,</p>
+            <p>Your gas recharge for <strong>${data.meter_name || 'Meter'}</strong> (${data.meter_id || 'N/A'}) was successful.</p>
+            <p><strong>Receipt Details:</strong></p>
+            <ul>
+              <li>Recharge Amount: <strong>${data.amount || '0'} RWF</strong></li>
+              <li>Token Code: <strong style="font-size: 16px; color: #6366f1;">${data.token || 'N/A'}</strong></li>
+              <li>Reference ID: ${data.transaction_id || 'N/A'}</li>
+            </ul>
+          `)
+        };
       case 'password-reset':
       case 'SYS-EMAIL-002':
         return {
