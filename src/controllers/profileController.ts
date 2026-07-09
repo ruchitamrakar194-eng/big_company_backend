@@ -101,6 +101,16 @@ export const updateWholesalerProfile = async (req: AuthRequest, res: Response) =
         res.json({ success: true, profile: profileResponse });
     } catch (error: any) {
         console.error('❌ Error updating profile:', error);
+        if (error.code === 'P2002') {
+            const target = error.meta?.target || '';
+            let msg = 'A record with this value already exists.';
+            if (target.includes('phone')) {
+                msg = 'This phone number is already registered to another account.';
+            } else if (target.includes('email')) {
+                msg = 'This email address is already registered to another account.';
+            }
+            return res.status(400).json({ error: msg });
+        }
         res.status(500).json({ error: error.message });
     }
 };
