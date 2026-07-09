@@ -46,7 +46,7 @@ export const getWholesalerProfile = async (req: AuthRequest, res: Response) => {
 
 export const updateWholesalerProfile = async (req: AuthRequest, res: Response) => {
     try {
-        const { name, company_name, contact_person, email, address, tin_number } = req.body;
+        const { name, company_name, contact_person, email, phone, address, tin_number } = req.body;
         console.log('✏️ Updating wholesaler profile:', req.user?.id);
 
         const profile = await prisma.wholesalerProfile.findUnique({
@@ -57,11 +57,15 @@ export const updateWholesalerProfile = async (req: AuthRequest, res: Response) =
             return res.status(404).json({ error: 'Wholesaler profile not found' });
         }
 
-        // Update User's name if provided
-        if (name) {
+        // Update User's details if provided
+        if (name || phone || email) {
             await prisma.user.update({
                 where: { id: req.user!.id },
-                data: { name }
+                data: {
+                    ...(name && { name }),
+                    ...(phone && { phone }),
+                    ...(email && { email })
+                }
             });
         }
 
