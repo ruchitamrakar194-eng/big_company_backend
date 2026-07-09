@@ -1615,6 +1615,9 @@ export const deleteCustomer = async (req: AuthRequest, res: Response) => {
 export const getProducts = async (req: AuthRequest, res: Response) => {
   try {
     const rawProducts = await prisma.product.findMany({
+      where: {
+        status: { not: 'deleted' }
+      },
       include: {
         retailerProfile: {
           select: { shopName: true }
@@ -1626,44 +1629,51 @@ export const getProducts = async (req: AuthRequest, res: Response) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // Aggregate by SKU (fallback to name if sku is missing), prioritizing wholesaler products as the representative record
+    // Aggregate by SKU (fallback to name if sku is missing)
     const groupedMap = new Map();
 
     rawProducts.forEach(product => {
       const key = product.sku || product.name;
       if (!groupedMap.has(key)) {
-        // Deep copy to avoid mutating the original fetched object
-        const copy = { ...product };
-        if (product.retailerId !== null) {
-          copy.retailerPrice = product.price; // Use the retailer's actual selling price
-        }
-        groupedMap.set(key, copy);
+        groupedMap.set(key, {
+          wholesalerProds: [] as any[],
+          retailerProds: [] as any[],
+          allProds: [] as any[]
+        });
+      }
+      const entry = groupedMap.get(key);
+      entry.allProds.push(product);
+      if (product.retailerId !== null) {
+        entry.retailerProds.push(product);
       } else {
-        const existing = groupedMap.get(key);
-        // If the existing representative is a retailer product, but the current one is a wholesaler product,
-        // swap the representative properties (except stock, which we aggregate)
-        if (existing.retailerId !== null && product.retailerId === null) {
-          const aggregatedStock = existing.stock + product.stock;
-          const actualRetailerPrice = existing.price; // Save retailer's actual selling price
-          Object.assign(existing, product);
-          existing.stock = aggregatedStock;
-          existing.retailerPrice = actualRetailerPrice; // Keep actual retailer price
-        } else {
-          existing.stock += product.stock;
-          if (product.retailerId !== null) {
-            existing.retailerPrice = product.price; // Update with actual retailer selling price
-          }
-        }
+        entry.wholesalerProds.push(product);
       }
     });
 
-    const products = Array.from(groupedMap.values());
+    const products = Array.from(groupedMap.values()).map(entry => {
+      const primaryWholesaler = entry.wholesalerProds[0];
+      const primaryRetailer = entry.retailerProds[0];
+      const representative = primaryWholesaler || primaryRetailer;
+      
+      const copy = { ...representative };
+
+      // Sum stock across all records
+      copy.stock = entry.allProds.reduce((sum: number, p: any) => sum + (p.stock || 0), 0);
+
+      // Determine clean prices
+      copy.supplierPrice = primaryWholesaler ? (primaryWholesaler.costPrice || 0) : 0;
+      copy.wholesalerPrice = primaryWholesaler ? (primaryWholesaler.price || 0) : (primaryRetailer ? (primaryRetailer.costPrice || 0) : 0);
+      copy.retailerPrice = primaryRetailer ? (primaryRetailer.price || 0) : (primaryWholesaler ? (primaryWholesaler.retailerPrice || 0) : 0);
+
+      return copy;
+    });
 
     res.json({ products });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 // Create product
 export const createProduct = async (req: AuthRequest, res: Response) => {
@@ -1732,6 +1742,7 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
       price,
       costPrice,
       retailerPrice,
+      stock,
       unit,
       lowStockThreshold,
       invoiceNumber,
@@ -1753,7 +1764,10 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
       imageUrl = await uploadImage(image);
     }
 
+    const parsedStock = stock !== undefined && stock !== null ? parseFloat(stock) : undefined;
+
     // Update Wholesaler products (where retailerId is null)
+    // Only update stock for wholesaler products if the target product being edited is a wholesaler product
     await prisma.product.updateMany({
       where: {
         ...whereClause,
@@ -1767,7 +1781,7 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
         price: price ? parseFloat(price) : undefined,
         costPrice: costPrice !== undefined ? (costPrice ? parseFloat(costPrice) : null) : undefined,
         retailerPrice: retailerPrice !== undefined ? (retailerPrice ? parseFloat(retailerPrice) : null) : undefined,
-        // Note: stock is NOT updated here because it's managed individually by wholesalers
+        stock: targetProduct.retailerId === null ? parsedStock : undefined,
         unit,
         lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined,
         invoiceNumber,
@@ -1778,6 +1792,7 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
     });
 
     // Update Retailer products (where retailerId is not null)
+    // Only update stock for retailer products if the target product being edited is a retailer product
     await prisma.product.updateMany({
       where: {
         ...whereClause,
@@ -1791,6 +1806,7 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
         // For retailers, Selling Price is the Retailer Price, and Cost Price is the Wholesaler Price
         price: retailerPrice ? parseFloat(retailerPrice) : undefined,
         costPrice: price ? parseFloat(price) : undefined,
+        stock: targetProduct.retailerId !== null ? parsedStock : undefined,
         unit,
         lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined,
         invoiceNumber,
@@ -1800,6 +1816,7 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
       }
     });
 
+
     const product = await prisma.product.findUnique({ where: { id: Number(id) } });
     res.json({ success: true, product });
   } catch (error: any) {
@@ -1808,7 +1825,7 @@ export const updateProduct = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Delete product (Deletes ALL products with the same SKU/Name)
+// Delete product (Deletes ALL products with the same SKU/Name, with soft delete fallback)
 export const deleteProduct = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -1819,8 +1836,19 @@ export const deleteProduct = async (req: AuthRequest, res: Response) => {
 
     const whereClause = targetProduct.sku ? { sku: targetProduct.sku } : { name: targetProduct.name };
 
-    await prisma.product.deleteMany({ where: whereClause });
-    res.json({ success: true, message: 'Products deleted successfully' });
+    try {
+      // Attempt hard delete (works if the product has never been ordered or sold)
+      await prisma.product.deleteMany({ where: whereClause });
+      res.json({ success: true, message: 'Products permanently deleted successfully' });
+    } catch (dbError: any) {
+      // If there are foreign key constraint references (e.g. P2003 error), fall back to soft delete
+      console.warn('Hard delete failed due to active constraints. Falling back to soft delete.', dbError.message);
+      await prisma.product.updateMany({
+        where: whereClause,
+        data: { status: 'deleted' }
+      });
+      res.json({ success: true, message: 'Products soft-deleted successfully' });
+    }
   } catch (error: any) {
     console.error('Delete Product Error:', error);
     res.status(500).json({ error: error.message });
