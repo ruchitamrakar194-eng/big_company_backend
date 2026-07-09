@@ -377,7 +377,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
 
         const config = await prisma.systemConfig.findFirst();
         const gasPrice = config?.gasPricePerM3 || 6500;
-        const rewardAmountRWF = totalProfit * 0.12;
+        const gasRewardShare = config?.gasRewardShare !== undefined ? config.gasRewardShare / 100 : 0.12;
+        const rewardAmountRWF = totalProfit * gasRewardShare;
         // Convert to gas units where 1 m³ = gasPrice RWF, rounded to 4 decimal places
         const rewardUnits = Number((rewardAmountRWF / gasPrice).toFixed(4));
 

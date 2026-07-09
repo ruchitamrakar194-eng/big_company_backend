@@ -1173,7 +1173,8 @@ export const createSale = async (req: AuthRequest, res: Response) => {
         if (totalProfit > 0) {
           const config = await prisma.systemConfig.findFirst();
           const gasPrice = config?.gasPricePerM3 || 6500;
-          const rewardAmountRWF = totalProfit * 0.12; // 12% of profit
+          const gasRewardShare = config?.gasRewardShare !== undefined ? config.gasRewardShare / 100 : 0.12;
+          const rewardAmountRWF = totalProfit * gasRewardShare; // Use configured share of profit
           const rewardUnits = Number((rewardAmountRWF / gasPrice).toFixed(4));
 
           await prisma.gasReward.create({

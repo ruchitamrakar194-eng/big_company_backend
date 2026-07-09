@@ -15,7 +15,8 @@ export const getGasConfig = async (req: AuthRequest, res: Response) => {
             data: {
                 price_per_m3: gasPrice,
                 min_topup: config?.minGasTopup || 500,
-                max_topup: config?.maxGasTopup || 100000
+                max_topup: config?.maxGasTopup || 100000,
+                gas_reward_share: config?.gasRewardShare || 12
             }
         });
     } catch (error: any) {
