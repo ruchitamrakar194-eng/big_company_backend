@@ -1633,17 +1633,26 @@ export const getProducts = async (req: AuthRequest, res: Response) => {
       const key = product.sku || product.name;
       if (!groupedMap.has(key)) {
         // Deep copy to avoid mutating the original fetched object
-        groupedMap.set(key, { ...product });
+        const copy = { ...product };
+        if (product.retailerId !== null) {
+          copy.retailerPrice = product.price; // Use the retailer's actual selling price
+        }
+        groupedMap.set(key, copy);
       } else {
         const existing = groupedMap.get(key);
         // If the existing representative is a retailer product, but the current one is a wholesaler product,
         // swap the representative properties (except stock, which we aggregate)
         if (existing.retailerId !== null && product.retailerId === null) {
           const aggregatedStock = existing.stock + product.stock;
+          const actualRetailerPrice = existing.price; // Save retailer's actual selling price
           Object.assign(existing, product);
           existing.stock = aggregatedStock;
+          existing.retailerPrice = actualRetailerPrice; // Keep actual retailer price
         } else {
           existing.stock += product.stock;
+          if (product.retailerId !== null) {
+            existing.retailerPrice = product.price; // Update with actual retailer selling price
+          }
         }
       }
     });
