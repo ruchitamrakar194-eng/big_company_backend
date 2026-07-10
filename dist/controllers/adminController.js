@@ -2518,7 +2518,6 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
                 },
                 sales: {
                     orderBy: { createdAt: 'desc' },
-                    take: 50,
                     include: {
                         saleItems: {
                             include: {
@@ -2528,37 +2527,53 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
                     }
                 },
                 customerOrders: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 50
+                    orderBy: { createdAt: 'desc' }
                 }
             }
         });
         if (!customer) {
             return res.status(404).json({ success: false, error: 'Customer not found' });
         }
+        // Calculate actual total gas rewards units
+        const gasRewardsSum = yield prisma_1.default.gasReward.aggregate({
+            where: { consumerId: customer.id },
+            _sum: { units: true }
+        });
         // Calculate wallet balances
         const walletSummary = {
             dashboardWallet: ((_a = customer.wallets.find(w => w.type === 'dashboard_wallet')) === null || _a === void 0 ? void 0 : _a.balance) || 0,
             rewardsWallet: ((_b = customer.wallets.find(w => w.type === 'rewards_wallet')) === null || _b === void 0 ? void 0 : _b.balance) || 0,
-            gasRewardsWallet: customer.gasRewards.reduce((sum, r) => sum + r.units, 0),
+            gasRewardsWallet: gasRewardsSum._sum.units || 0,
             creditWallet: ((_c = customer.wallets.find(w => w.type === 'credit_wallet')) === null || _c === void 0 ? void 0 : _c.balance) || 0,
             gasBalance: customer.gasMeters.reduce((sum, m) => sum + (m.currentUnits || 0), 0)
         };
-        // Fix: Manually fetch retailer profiles to avoid Prisma crashing on missing required relation
+        // Fetch retailer profiles to link shop names for sales
         const retailerIds = [...new Set(customer.sales.map(s => s.retailerId))];
         const retailers = yield prisma_1.default.retailerProfile.findMany({
             where: { id: { in: retailerIds } },
             select: { id: true, shopName: true }
         });
         const retailerMap = new Map(retailers.map(r => [r.id, r]));
-        const ordersWithRetailers = customer.sales.map(s => (Object.assign(Object.assign({}, s), { retailerProfile: retailerMap.get(s.retailerId) || { id: s.retailerId, shopName: 'Unknown Retailer' } })));
+        // Format Sales (Retail Orders)
+        const formattedSales = customer.sales.map(s => (Object.assign(Object.assign({}, s), { retailerProfile: retailerMap.get(s.retailerId) || { id: s.retailerId, shopName: 'Unknown Retailer' } })));
+        // Format customerOrders (Gas / Service Orders)
+        const formattedGasOrders = customer.customerOrders.map(co => ({
+            id: co.id,
+            retailerProfile: { id: 'GAS_SERVICE', shopName: 'Big Gas Service' },
+            totalAmount: co.amount,
+            status: co.status,
+            createdAt: co.createdAt,
+            type: 'gas'
+        }));
+        // Combine and sort consolidated orders by date descending
+        const consolidatedOrders = [...formattedSales, ...formattedGasOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         // Order statistics
         const orderStats = {
-            pending: ordersWithRetailers.filter(s => s.status === 'pending').length,
-            active: ordersWithRetailers.filter(s => s.status === 'processing' || s.status === 'active').length,
-            completed: ordersWithRetailers.filter(s => s.status === 'completed' || s.status === 'delivered').length,
-            cancelled: ordersWithRetailers.filter(s => s.status === 'cancelled').length,
-            total: ordersWithRetailers.length
+            pending: consolidatedOrders.filter(s => s.status === 'pending').length,
+            active: consolidatedOrders.filter(s => s.status === 'processing' || s.status === 'active').length,
+            completed: consolidatedOrders.filter(s => s.status === 'completed' || s.status === 'delivered').length,
+            cancelled: consolidatedOrders.filter(s => s.status === 'cancelled').length,
+            total: consolidatedOrders.length
         };
         // Get all transactions from all wallets
         const allTransactions = customer.wallets.flatMap(w => w.walletTransactions.map(t => (Object.assign(Object.assign({}, t), { walletType: w.type })))).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -2570,9 +2585,9 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
             totalRewards: customer.gasRewards.reduce((sum, r) => sum + r.units, 0)
         };
         // Last order details
-        const lastOrder = ordersWithRetailers.length > 0 ? ordersWithRetailers[0] : null;
+        const lastOrder = consolidatedOrders.length > 0 ? consolidatedOrders[0] : null;
         // Supplier chain - find linked retailers from sales
-        const linkedRetailers = Array.from(new Set(ordersWithRetailers.map(s => { var _a; return (_a = s.retailerProfile) === null || _a === void 0 ? void 0 : _a.id; }).filter(Boolean)));
+        const linkedRetailers = Array.from(new Set(formattedSales.map(s => { var _a; return (_a = s.retailerProfile) === null || _a === void 0 ? void 0 : _a.id; }).filter(Boolean)));
         const supplierChain = yield prisma_1.default.retailerProfile.findMany({
             where: { id: { in: linkedRetailers } },
             include: {
@@ -2603,7 +2618,7 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
                     currency: w.currency
                 })),
                 orderStats,
-                orders: ordersWithRetailers,
+                orders: consolidatedOrders,
                 transactionHistory: allTransactions,
                 nfcCards: customer.nfcCards.map(card => ({
                     id: card.id,

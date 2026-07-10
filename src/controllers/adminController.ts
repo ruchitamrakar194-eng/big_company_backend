@@ -2783,7 +2783,6 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
         },
         sales: {
           orderBy: { createdAt: 'desc' },
-          take: 50,
           include: {
             saleItems: {
               include: {
@@ -2793,8 +2792,7 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
           }
         },
         customerOrders: {
-          orderBy: { createdAt: 'desc' },
-          take: 50
+          orderBy: { createdAt: 'desc' }
         }
       }
     });
@@ -2818,25 +2816,42 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
       gasBalance: customer.gasMeters.reduce((sum, m) => sum + (m.currentUnits || 0), 0)
     };
 
-    // Fix: Manually fetch retailer profiles to avoid Prisma crashing on missing required relation
+    // Fetch retailer profiles to link shop names for sales
     const retailerIds = [...new Set(customer.sales.map(s => s.retailerId))];
     const retailers = await prisma.retailerProfile.findMany({
       where: { id: { in: retailerIds } },
       select: { id: true, shopName: true }
     });
     const retailerMap = new Map(retailers.map(r => [r.id, r]));
-    const ordersWithRetailers = customer.sales.map(s => ({
+
+    // Format Sales (Retail Orders)
+    const formattedSales = customer.sales.map(s => ({
       ...s,
       retailerProfile: retailerMap.get(s.retailerId) || { id: s.retailerId, shopName: 'Unknown Retailer' }
     }));
 
+    // Format customerOrders (Gas / Service Orders)
+    const formattedGasOrders = customer.customerOrders.map(co => ({
+      id: co.id,
+      retailerProfile: { id: 'GAS_SERVICE', shopName: 'Big Gas Service' },
+      totalAmount: co.amount,
+      status: co.status,
+      createdAt: co.createdAt,
+      type: 'gas'
+    }));
+
+    // Combine and sort consolidated orders by date descending
+    const consolidatedOrders = [...formattedSales, ...formattedGasOrders].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
     // Order statistics
     const orderStats = {
-      pending: ordersWithRetailers.filter(s => s.status === 'pending').length,
-      active: ordersWithRetailers.filter(s => s.status === 'processing' || s.status === 'active').length,
-      completed: ordersWithRetailers.filter(s => s.status === 'completed' || s.status === 'delivered').length,
-      cancelled: ordersWithRetailers.filter(s => s.status === 'cancelled').length,
-      total: ordersWithRetailers.length
+      pending: consolidatedOrders.filter(s => s.status === 'pending').length,
+      active: consolidatedOrders.filter(s => s.status === 'processing' || s.status === 'active').length,
+      completed: consolidatedOrders.filter(s => s.status === 'completed' || s.status === 'delivered').length,
+      cancelled: consolidatedOrders.filter(s => s.status === 'cancelled').length,
+      total: consolidatedOrders.length
     };
 
     // Get all transactions from all wallets
@@ -2847,19 +2862,31 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
       }))
     ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+    // Calculate actual total gas top-ups stats
+    const totalGasTopupsSum = await prisma.gasTopup.aggregate({
+      where: { consumerId: customer.id, status: { in: ['completed', 'success'] } },
+      _count: { id: true },
+      _sum: { amount: true, units: true }
+    });
+
+    const totalGasRewardsSum = await prisma.gasReward.aggregate({
+      where: { consumerId: customer.id },
+      _sum: { units: true }
+    });
+
     // Gas usage summary
     const gasUsage = {
-      totalTopups: customer.gasTopups.length,
-      totalAmount: customer.gasTopups.reduce((sum, g) => sum + g.amount, 0),
-      totalUnits: customer.gasTopups.reduce((sum, g) => sum + g.units, 0),
-      totalRewards: customer.gasRewards.reduce((sum, r) => sum + r.units, 0)
+      totalTopups: totalGasTopupsSum._count.id || 0,
+      totalAmount: totalGasTopupsSum._sum.amount || 0,
+      totalUnits: totalGasTopupsSum._sum.units || 0,
+      totalRewards: totalGasRewardsSum._sum.units || 0
     };
 
     // Last order details
-    const lastOrder = ordersWithRetailers.length > 0 ? ordersWithRetailers[0] : null;
+    const lastOrder = consolidatedOrders.length > 0 ? consolidatedOrders[0] : null;
 
     // Supplier chain - find linked retailers from sales
-    const linkedRetailers = Array.from(new Set(ordersWithRetailers.map(s => s.retailerProfile?.id).filter(Boolean)));
+    const linkedRetailers = Array.from(new Set(formattedSales.map(s => s.retailerProfile?.id).filter(Boolean)));
     const supplierChain = await prisma.retailerProfile.findMany({
       where: { id: { in: linkedRetailers as number[] } },
       include: {
@@ -2891,7 +2918,7 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
           currency: w.currency
         })),
         orderStats,
-        orders: ordersWithRetailers,
+        orders: consolidatedOrders,
         transactionHistory: allTransactions,
         nfcCards: customer.nfcCards.map(card => ({
           id: card.id,
