@@ -2577,12 +2577,22 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
         };
         // Get all transactions from all wallets
         const allTransactions = customer.wallets.flatMap(w => w.walletTransactions.map(t => (Object.assign(Object.assign({}, t), { walletType: w.type })))).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        // Calculate actual total gas top-ups stats
+        const totalGasTopupsSum = yield prisma_1.default.gasTopup.aggregate({
+            where: { consumerId: customer.id, status: { in: ['completed', 'success'] } },
+            _count: { id: true },
+            _sum: { amount: true, units: true }
+        });
+        const totalGasRewardsSum = yield prisma_1.default.gasReward.aggregate({
+            where: { consumerId: customer.id },
+            _sum: { units: true }
+        });
         // Gas usage summary
         const gasUsage = {
-            totalTopups: customer.gasTopups.length,
-            totalAmount: customer.gasTopups.reduce((sum, g) => sum + g.amount, 0),
-            totalUnits: customer.gasTopups.reduce((sum, g) => sum + g.units, 0),
-            totalRewards: customer.gasRewards.reduce((sum, r) => sum + r.units, 0)
+            totalTopups: totalGasTopupsSum._count.id || 0,
+            totalAmount: totalGasTopupsSum._sum.amount || 0,
+            totalUnits: totalGasTopupsSum._sum.units || 0,
+            totalRewards: totalGasRewardsSum._sum.units || 0
         };
         // Last order details
         const lastOrder = consolidatedOrders.length > 0 ? consolidatedOrders[0] : null;
