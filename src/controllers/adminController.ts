@@ -2845,13 +2845,34 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
-    // Order statistics
+    // Filter completed and cancelled orders based on linked retailer's lastSettlementDate
+    const lastSettlementDate = customer.linkedRetailer?.lastSettlementDate ? new Date(customer.linkedRetailer.lastSettlementDate) : null;
+
+    const filteredCompletedOrders = consolidatedOrders.filter(s => {
+      const isCompleted = s.status === 'completed' || s.status === 'delivered';
+      if (!isCompleted) return false;
+      if (lastSettlementDate) {
+        return new Date(s.createdAt) > lastSettlementDate;
+      }
+      return true;
+    });
+
+    const filteredCancelledOrders = consolidatedOrders.filter(s => {
+      const isCancelled = s.status === 'cancelled';
+      if (!isCancelled) return false;
+      if (lastSettlementDate) {
+        return new Date(s.createdAt) > lastSettlementDate;
+      }
+      return true;
+    });
+
+    // Order statistics (completed/cancelled reset for new periods)
     const orderStats = {
       pending: consolidatedOrders.filter(s => s.status === 'pending').length,
       active: consolidatedOrders.filter(s => s.status === 'processing' || s.status === 'active').length,
-      completed: consolidatedOrders.filter(s => s.status === 'completed' || s.status === 'delivered').length,
-      cancelled: consolidatedOrders.filter(s => s.status === 'cancelled').length,
-      total: consolidatedOrders.length
+      completed: filteredCompletedOrders.length,
+      cancelled: filteredCancelledOrders.length,
+      total: consolidatedOrders.filter(s => s.status === 'pending' || s.status === 'processing' || s.status === 'active').length + filteredCompletedOrders.length + filteredCancelledOrders.length
     };
 
     // Get all transactions from all wallets
@@ -2971,6 +2992,7 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
           include: { terminals: true }
         },
         nfcCards: true,
+        retailerLoans: true,
         orders: {
           orderBy: { createdAt: 'desc' },
           take: 50,
@@ -3018,15 +3040,19 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
       totalRevenue: retailer.sales.reduce((sum, s) => sum + s.totalAmount, 0)
     };
 
+    // Calculate spendable credit (Wholesaler Credit) from loans matching retailer portal AddStockPage.tsx
+    const loansWithCredit = (retailer.retailerLoans || []).filter(l => (l.amount || 0) > 0);
+    const totalSpendableCredit = loansWithCredit.reduce((sum, l) => sum + (l.amount || 0), 0);
+
     // Credit summary
     const creditSummary = retailer.credit ? {
       creditLimit: retailer.credit.creditLimit,
       usedCredit: retailer.credit.usedCredit,
-      availableCredit: retailer.credit.availableCredit
+      availableCredit: totalSpendableCredit > 0 ? totalSpendableCredit : retailer.credit.availableCredit
     } : {
       creditLimit: retailer.creditLimit,
       usedCredit: 0,
-      availableCredit: retailer.creditLimit
+      availableCredit: totalSpendableCredit > 0 ? totalSpendableCredit : retailer.creditLimit
     };
 
     // Last order details
