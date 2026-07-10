@@ -2803,11 +2803,17 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
       return res.status(404).json({ success: false, error: 'Customer not found' });
     }
 
+    // Calculate actual total gas rewards units
+    const gasRewardsSum = await prisma.gasReward.aggregate({
+      where: { consumerId: customer.id },
+      _sum: { units: true }
+    });
+
     // Calculate wallet balances
     const walletSummary = {
       dashboardWallet: customer.wallets.find(w => w.type === 'dashboard_wallet')?.balance || 0,
       rewardsWallet: customer.wallets.find(w => w.type === 'rewards_wallet')?.balance || 0,
-      gasRewardsWallet: customer.gasRewards.reduce((sum, r) => sum + r.units, 0),
+      gasRewardsWallet: gasRewardsSum._sum.units || 0,
       creditWallet: customer.wallets.find(w => w.type === 'credit_wallet')?.balance || 0,
       gasBalance: customer.gasMeters.reduce((sum, m) => sum + (m.currentUnits || 0), 0)
     };
