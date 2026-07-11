@@ -82,8 +82,17 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     const outstandingAmount = Math.round(customerLoanOutstanding + retailerOutstanding);
 
     // 5. Gas (using GasTopup or Sale with gas category)
+    const resetAlert = await prisma.systemAlert.findFirst({
+      where: { apiName: 'GAS_REPORTING_PERIOD_RESET' },
+      orderBy: { createdAt: 'desc' }
+    });
+    const lastGasResetDate = resetAlert ? new Date(resetAlert.errorMessage) : null;
+
     const gasTopups = await prisma.gasTopup.findMany({
-      where: { status: { in: ['completed', 'success'] } }
+      where: { 
+        status: { in: ['completed', 'success'] },
+        ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
+      }
     });
     const gasTotalPurchases = gasTopups.length;
     const gasTotalAmount = Math.round(gasTopups.reduce((acc, g) => acc + g.amount, 0));
@@ -2886,15 +2895,29 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
       }))
     ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+    // Fetch global lastGasResetDate
+    const resetAlert = await prisma.systemAlert.findFirst({
+      where: { apiName: 'GAS_REPORTING_PERIOD_RESET' },
+      orderBy: { createdAt: 'desc' }
+    });
+    const lastGasResetDate = resetAlert ? new Date(resetAlert.errorMessage) : null;
+
     // Calculate actual total gas top-ups stats
     const totalGasTopupsSum = await prisma.gasTopup.aggregate({
-      where: { consumerId: customer.id, status: { in: ['completed', 'success'] } },
+      where: { 
+        consumerId: customer.id, 
+        status: { in: ['completed', 'success'] },
+        ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
+      },
       _count: { id: true },
       _sum: { amount: true, units: true }
     });
 
     const totalGasRewardsSum = await prisma.gasReward.aggregate({
-      where: { consumerId: customer.id },
+      where: { 
+        consumerId: customer.id,
+        ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
+      },
       _sum: { units: true }
     });
 
@@ -4463,6 +4486,25 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
       res.status(400).json({ success: false, error: 'Invalid type' });
     }
   } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// End the month or term globally for gas reporting
+export const endGasPeriod = async (req: AuthRequest, res: Response) => {
+  try {
+    const now = new Date();
+    await prisma.systemAlert.create({
+      data: {
+        apiName: 'GAS_REPORTING_PERIOD_RESET',
+        status: 'resolved',
+        errorMessage: now.toISOString()
+      }
+    });
+
+    res.json({ success: true, message: 'Gas reporting period ended successfully' });
+  } catch (error: any) {
+    console.error('End Gas Period Error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

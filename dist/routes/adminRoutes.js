@@ -124,6 +124,7 @@ router.get('/profit-invoices', adminController_1.getAdminProfitInvoices);
 router.post('/profit-invoices/generate', adminController_1.generateAdminProfitInvoice);
 router.get('/profit-invoices/recipients', adminController_1.getProfitInvoiceRecipients);
 router.get('/profit-invoices/stats/:type/:id', adminController_1.getProfitInvoiceStats);
+router.post('/gas/end-period', adminController_1.endGasPeriod);
 // ==========================================
 // WHOLESALE ORDER MANAGEMENT
 // ==========================================

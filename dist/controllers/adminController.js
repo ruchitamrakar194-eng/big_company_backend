@@ -46,7 +46,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getRetailerWholesalerLinkage = exports.getWholesalerAccountDetails = exports.getWorkerAccountDetails = exports.getRetailerAccountDetails = exports.getCustomerAccountDetails = exports.updateSystemConfig = exports.getSystemConfig = exports.getRevenueReport = exports.getTransactionReport = exports.unlinkNFCCard = exports.activateNFCCard = exports.blockNFCCard = exports.getNFCCardTransactions = exports.registerNFCCard = exports.rejectLoan = exports.approveLoan = exports.deleteEmployee = exports.updateEmployee = exports.createEmployee = exports.getEmployees = exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProducts = exports.deleteCustomer = exports.updateCustomerStatus = exports.updateCustomer = exports.updateWholesalerStatus = exports.updateRetailerStatus = exports.deleteWholesaler = exports.updateWholesaler = exports.verifyWholesaler = exports.verifyRetailer = exports.deleteRetailer = exports.updateRetailer = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getCategories = exports.getNFCCards = exports.getLoans = exports.createWholesaler = exports.getWholesalers = exports.createRetailer = exports.getRetailers = exports.createCustomer = exports.getCustomer = exports.getCustomers = exports.getReports = exports.getDashboard = void 0;
-exports.getProfitInvoiceStats = exports.getProfitInvoiceRecipients = exports.generateAdminProfitInvoice = exports.getAdminProfitInvoices = exports.processRefundRequest = exports.getRefundRequests = exports.getCustomerCreditLimit = exports.updateCustomerCreditLimit = exports.acknowledgeAlert = exports.getSystemAlerts = exports.updateEmailEvent = exports.getEmailEvents = exports.sendManualEmail = exports.deleteEmailTemplate = exports.saveEmailTemplate = exports.getEmailTemplates = exports.resendEmail = exports.getEmailLogs = exports.confirmWholesaleDelivery = exports.deleteSettlementInvoice = exports.updateSettlementInvoice = exports.getSettlementInvoice = exports.createSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailerFromWholesaler = exports.linkRetailerToWholesaler = void 0;
+exports.endGasPeriod = exports.getProfitInvoiceStats = exports.getProfitInvoiceRecipients = exports.generateAdminProfitInvoice = exports.getAdminProfitInvoices = exports.processRefundRequest = exports.getRefundRequests = exports.getCustomerCreditLimit = exports.updateCustomerCreditLimit = exports.acknowledgeAlert = exports.getSystemAlerts = exports.updateEmailEvent = exports.getEmailEvents = exports.sendManualEmail = exports.deleteEmailTemplate = exports.saveEmailTemplate = exports.getEmailTemplates = exports.resendEmail = exports.getEmailLogs = exports.confirmWholesaleDelivery = exports.deleteSettlementInvoice = exports.updateSettlementInvoice = exports.getSettlementInvoice = exports.createSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailerFromWholesaler = exports.linkRetailerToWholesaler = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const cloudinary_1 = require("../utils/cloudinary");
 const auth_1 = require("../utils/auth");
@@ -116,8 +116,13 @@ const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const retailerOutstanding = retailerCredits.reduce((acc, r) => acc + r.usedCredit, 0);
         const outstandingAmount = Math.round(customerLoanOutstanding + retailerOutstanding);
         // 5. Gas (using GasTopup or Sale with gas category)
+        const resetAlert = yield prisma_1.default.systemAlert.findFirst({
+            where: { apiName: 'GAS_REPORTING_PERIOD_RESET' },
+            orderBy: { createdAt: 'desc' }
+        });
+        const lastGasResetDate = resetAlert ? new Date(resetAlert.errorMessage) : null;
         const gasTopups = yield prisma_1.default.gasTopup.findMany({
-            where: { status: { in: ['completed', 'success'] } }
+            where: Object.assign({ status: { in: ['completed', 'success'] } }, (lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {}))
         });
         const gasTotalPurchases = gasTopups.length;
         const gasTotalAmount = Math.round(gasTopups.reduce((acc, g) => acc + g.amount, 0));
@@ -2600,14 +2605,20 @@ const getCustomerAccountDetails = (req, res) => __awaiter(void 0, void 0, void 0
         };
         // Get all transactions from all wallets
         const allTransactions = customer.wallets.flatMap(w => w.walletTransactions.map(t => (Object.assign(Object.assign({}, t), { walletType: w.type })))).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        // Fetch global lastGasResetDate
+        const resetAlert = yield prisma_1.default.systemAlert.findFirst({
+            where: { apiName: 'GAS_REPORTING_PERIOD_RESET' },
+            orderBy: { createdAt: 'desc' }
+        });
+        const lastGasResetDate = resetAlert ? new Date(resetAlert.errorMessage) : null;
         // Calculate actual total gas top-ups stats
         const totalGasTopupsSum = yield prisma_1.default.gasTopup.aggregate({
-            where: { consumerId: customer.id, status: { in: ['completed', 'success'] } },
+            where: Object.assign({ consumerId: customer.id, status: { in: ['completed', 'success'] } }, (lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})),
             _count: { id: true },
             _sum: { amount: true, units: true }
         });
         const totalGasRewardsSum = yield prisma_1.default.gasReward.aggregate({
-            where: { consumerId: customer.id },
+            where: Object.assign({ consumerId: customer.id }, (lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})),
             _sum: { units: true }
         });
         // Gas usage summary
@@ -4062,3 +4073,22 @@ const getProfitInvoiceStats = (req, res) => __awaiter(void 0, void 0, void 0, fu
     }
 });
 exports.getProfitInvoiceStats = getProfitInvoiceStats;
+// End the month or term globally for gas reporting
+const endGasPeriod = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const now = new Date();
+        yield prisma_1.default.systemAlert.create({
+            data: {
+                apiName: 'GAS_REPORTING_PERIOD_RESET',
+                status: 'resolved',
+                errorMessage: now.toISOString()
+            }
+        });
+        res.json({ success: true, message: 'Gas reporting period ended successfully' });
+    }
+    catch (error) {
+        console.error('End Gas Period Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+exports.endGasPeriod = endGasPeriod;

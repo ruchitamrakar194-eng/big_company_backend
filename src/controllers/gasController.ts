@@ -507,7 +507,17 @@ export const getGasUsage = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        const where: any = { consumerId: consumerProfile.id };
+        // Fetch global lastGasResetDate
+        const resetAlert = await prisma.systemAlert.findFirst({
+            where: { apiName: 'GAS_REPORTING_PERIOD_RESET' },
+            orderBy: { createdAt: 'desc' }
+        });
+        const lastGasResetDate = resetAlert ? new Date(resetAlert.errorMessage) : null;
+
+        const where: any = { 
+            consumerId: consumerProfile.id,
+            ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
+        };
         if (meter_id) {
             where.meterId = meter_id as string;
         }

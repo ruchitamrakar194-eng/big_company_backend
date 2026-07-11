@@ -545,9 +545,19 @@ export const getProfileStats = async (req: AuthRequest, res: Response) => {
         });
         const walletBalance = wallets.reduce((sum, wallet) => sum + wallet.balance, 0);
 
+        // Fetch global lastGasResetDate
+        const resetAlert = await prisma.systemAlert.findFirst({
+            where: { apiName: 'GAS_REPORTING_PERIOD_RESET' },
+            orderBy: { createdAt: 'desc' }
+        });
+        const lastGasResetDate = resetAlert ? new Date(resetAlert.errorMessage) : null;
+
         // Get gas rewards total
         const gasRewards = await prisma.gasReward.findMany({
-            where: { consumerId: consumerProfile.id }
+            where: { 
+                consumerId: consumerProfile.id,
+                ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
+            }
         });
         const totalGasRewards = gasRewards.reduce((sum, reward) => sum + reward.units, 0);
 

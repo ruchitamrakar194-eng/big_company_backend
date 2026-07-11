@@ -78,7 +78,8 @@ import {
   getAdminProfitInvoices,
   generateAdminProfitInvoice,
   getProfitInvoiceRecipients,
-  getProfitInvoiceStats
+  getProfitInvoiceStats,
+  endGasPeriod
 } from '../controllers/adminController';
 import { getSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../controllers/supplierController';
 import { getJobs, createJob, updateJob, deleteJob, getApplications, createApplication, updateApplicationStatus } from '../controllers/recruitmentController';
@@ -224,6 +225,7 @@ router.get('/profit-invoices', getAdminProfitInvoices);
 router.post('/profit-invoices/generate', generateAdminProfitInvoice);
 router.get('/profit-invoices/recipients', getProfitInvoiceRecipients);
 router.get('/profit-invoices/stats/:type/:id', getProfitInvoiceStats);
+router.post('/gas/end-period', endGasPeriod);
 
 // ==========================================
 // WHOLESALE ORDER MANAGEMENT
