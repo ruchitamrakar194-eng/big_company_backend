@@ -3152,12 +3152,16 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
     };
 
     // Profit Wallet — realized profit from sales (sellingPrice - costPrice) matching retailer dashboard
+    // Only includes sales after lastSettlementDate (same reset behavior as retailer's own Profit Wallet tab)
     const systemConfig = await prisma.systemConfig.findFirst();
     const retailerMarkup = (systemConfig as any)?.retailerMarkup || 20;
+    const settlementDateForProfit = retailer.lastSettlementDate ? new Date(retailer.lastSettlementDate) : null;
     let totalSalesRevenue = 0;
     let totalSalesCost = 0;
     for (const sale of retailer.sales) {
       if (sale.status === 'cancelled') continue;
+      // Apply same date filter as retailer dashboard: only count sales after lastSettlementDate
+      if (settlementDateForProfit && new Date(sale.createdAt) < settlementDateForProfit) continue;
       for (const item of (sale as any).saleItems || []) {
         const revenue = (item.price || 0) * (item.quantity || 0);
         const cost = item.product?.costPrice && item.product.costPrice > 0
