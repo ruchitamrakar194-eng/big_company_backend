@@ -435,8 +435,9 @@ export const getCustomers = async (req: AuthRequest, res: Response) => {
         wallets: true,
         gasRewards: true,
         sales: {
-          select: {
-            totalAmount: true
+          include: {
+            saleItems: true,
+            retailerProfile: true
           }
         },
         gasTopups: {
@@ -451,8 +452,22 @@ export const getCustomers = async (req: AuthRequest, res: Response) => {
     });
 
     const formattedCustomers = customers.map(customer => {
-      const orderCount = customer.sales.length;
-      const totalSpent = customer.sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+      const activeSales = customer.sales.filter(sale => {
+        // Exclude gas top-up purchases (which have no saleItems)
+        if (!sale.saleItems || sale.saleItems.length === 0) {
+          return false;
+        }
+
+        // Exclude sales before the retailer's lastSettlementDate
+        const settlementDate = sale.retailerProfile?.lastSettlementDate;
+        if (settlementDate) {
+          return new Date(sale.createdAt) >= new Date(settlementDate);
+        }
+        return true;
+      });
+
+      const orderCount = activeSales.length;
+      const totalSpent = activeSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
 
       // Calculate gas rewards balance dynamically
       const totalGasRewards = customer.gasRewards.reduce((sum, r) => sum + r.units, 0);
