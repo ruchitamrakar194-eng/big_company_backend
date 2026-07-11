@@ -3059,7 +3059,7 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
         sales: {
           orderBy: { createdAt: 'desc' },
           include: {
-            consumerProfile: { select: { fullName: true } },
+            consumerProfile: { include: { user: { select: { phone: true } } } },
             saleItems: { include: { product: true } }
           }
         },
@@ -3125,11 +3125,17 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
 
     // Sales statistics (sales TO consumers)
     const salesStats = {
-      pending: retailer.sales.filter(s => s.status === 'pending').length,
-      completed: filteredCustomerCompleted.length,
-      cancelled: filteredCustomerCancelled.length,
+      pending:    retailer.sales.filter(s => s.status === 'pending').length,
+      processing: retailer.sales.filter(s => s.status === 'processing' || s.status === 'confirmed').length,
+      shipped:    retailer.sales.filter(s => s.status === 'shipped').length,
+      ready:      retailer.sales.filter(s => s.status === 'ready').length,
+      completed:  filteredCustomerCompleted.length,
+      cancelled:  filteredCustomerCancelled.length,
       total: retailer.sales.filter(s => s.status === 'pending').length + filteredCustomerCompleted.length + filteredCustomerCancelled.length,
-      totalRevenue: filteredCustomerCompleted.reduce((sum, s) => sum + s.totalAmount, 0)
+      totalRevenue:           filteredCustomerCompleted.reduce((sum, s) => sum + s.totalAmount, 0),
+      dashboardWalletRevenue: filteredCustomerCompleted.filter(s => s.paymentMethod === 'dashboard_wallet' || s.paymentMethod === 'wallet').reduce((sum, s) => sum + s.totalAmount, 0),
+      creditWalletRevenue:    filteredCustomerCompleted.filter(s => s.paymentMethod === 'credit_wallet'    || s.paymentMethod === 'credit').reduce((sum, s) => sum + s.totalAmount, 0),
+      mobileMoneyRevenue:     filteredCustomerCompleted.filter(s => s.paymentMethod === 'mobile_money').reduce((sum, s) => sum + s.totalAmount, 0),
     };
 
     // Calculate spendable credit (Wholesaler Credit) from loans matching retailer portal AddStockPage.tsx
