@@ -4502,6 +4502,13 @@ export const endGasPeriod = async (req: AuthRequest, res: Response) => {
       }
     });
 
+    // Reset remaining units on all meters to zero
+    await prisma.gasMeter.updateMany({
+      data: {
+        current_units: 0
+      }
+    });
+
     res.json({ success: true, message: 'Gas reporting period ended successfully' });
   } catch (error: any) {
     console.error('End Gas Period Error:', error);
