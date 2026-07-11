@@ -118,7 +118,7 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const totalRevenue = allOrders.filter(o => o.status === 'delivered').reduce((sum, order) => sum + order.totalAmount, 0);
         // Calculate inventory values
         const inventoryValueWallet = allProducts.reduce((sum, p) => sum + (p.stock * (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0))), 0);
-        const stockValueWholesaler = allProducts.reduce((sum, p) => sum + (p.stock * p.price), 0);
+        const stockValueWholesaler = allProducts.reduce((sum, p) => sum + (p.stock * (p.price === 0 ? (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0)) : p.price)), 0);
         // Count pending orders (not limited by settlement date so they don't disappear)
         const pendingOrdersCount = yield prisma_1.default.order.count({
             where: { wholesalerId: wholesalerProfile.id, status: 'pending' }
@@ -301,7 +301,7 @@ const getInventoryStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         // Calculate statistics
         const totalProducts = products.length;
         const stockValueSupplier = products.reduce((sum, p) => sum + (p.stock * (p.costPrice || 0)), 0);
-        const stockValueWholesaler = products.reduce((sum, p) => sum + (p.stock * p.price), 0);
+        const stockValueWholesaler = products.reduce((sum, p) => sum + (p.stock * (p.price === 0 ? (p.costPrice || 0) : p.price)), 0);
         const stockProfitMargin = stockValueWholesaler - stockValueSupplier;
         const lowStockCount = products.filter(p => p.lowStockThreshold && p.stock > 0 && p.stock <= p.lowStockThreshold).length;
         const outOfStockCount = products.filter(p => p.stock === 0).length;

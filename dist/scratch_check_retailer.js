@@ -14,14 +14,10 @@ const prisma = new PrismaClient();
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         const retailerId = 24;
-        const retailer = yield prisma.retailerProfile.findUnique({
-            where: { id: retailerId },
-            include: {
-                credit: true,
-                retailerLoans: true
-            }
+        const count = yield prisma.sale.count({
+            where: { retailerId }
         });
-        console.log('Retailer:', JSON.stringify(retailer, null, 2));
+        console.log('Total sales count in database for retailer 24:', count);
     });
 }
 main().catch(console.error).finally(() => prisma.$disconnect());

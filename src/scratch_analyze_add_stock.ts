@@ -1,9 +1,5 @@
 const fs = require('fs');
-const content = fs.readFileSync('c:/Users/Saif16/Desktop/big_pos/big-pos frontend/src/pages/retailer/AddStockPage.tsx', 'utf-8');
-const lines = content.split('\n');
-
-const start = 115;
-const end = 145;
-for (let i = start; i <= end; i++) {
-  console.log(`${i}: ${lines[i-1]}`);
-}
+const content = fs.readFileSync('c:/Users/Saif16/Desktop/big_pos/big-pos frontend/src/pages/admin/ProductListingPage.tsx', 'utf-8'); // wait, the file is ProductListingPage.tsx or CustomerListingPage.tsx?
+// Let's check files in c:/Users/Saif16/Desktop/big_pos/big-pos frontend/src/pages/admin
+const dir = fs.readdirSync('c:/Users/Saif16/Desktop/big_pos/big-pos frontend/src/pages/admin');
+console.log('Files in admin page dir:', dir);

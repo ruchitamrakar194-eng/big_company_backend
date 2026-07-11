@@ -1,8 +1,8 @@
 const fs = require('fs');
-const content = fs.readFileSync('c:/Users/Saif16/Desktop/big_pos/big-pos frontend/src/pages/retailer/AddStockPage.tsx', 'utf-8');
+const content = fs.readFileSync('c:/Users/Saif16/Desktop/big_pos/big_company_backend/src/controllers/adminController.ts', 'utf-8');
 const lines = content.split('\n');
-const start = 115;
-const end = 145;
-for (let i = start; i <= end; i++) {
-    console.log(`${i}: ${lines[i - 1]}`);
-}
+lines.forEach((line, idx) => {
+    if (line.includes('lastSettlementDate')) {
+        console.log(`${idx + 1}: ${line.trim()}`);
+    }
+});

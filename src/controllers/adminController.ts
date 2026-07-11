@@ -104,7 +104,10 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     // 8. System-wide Wallets (Consumer & Retailer cash wallet balances + secondary wallets)
     const consumerWalletSum = await prisma.consumerProfile.aggregate({ _sum: { walletBalance: true } });
     const retailerWalletSum = await prisma.retailerProfile.aggregate({ _sum: { walletBalance: true } });
-    const secondaryWalletsSum = await prisma.wallet.aggregate({ _sum: { balance: true } });
+    const secondaryWalletsSum = await prisma.wallet.aggregate({
+      where: { type: 'capital' },
+      _sum: { balance: true }
+    });
     const totalWalletBalance = Math.round(
       (consumerWalletSum._sum.walletBalance || 0) +
       (retailerWalletSum._sum.walletBalance || 0) +
@@ -2986,7 +2989,7 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
         user: true,
         credit: true,
         linkedWholesaler: {
-          select: { id: true, companyName: true, user: { select: { phone: true, email: true } } }
+          select: { id: true, companyName: true, lastSettlementDate: true, user: { select: { phone: true, email: true } } }
         },
         branches: {
           include: { terminals: true }
@@ -2995,7 +2998,6 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
         retailerLoans: true,
         orders: {
           orderBy: { createdAt: 'desc' },
-          take: 50,
           include: {
             wholesalerProfile: { select: { companyName: true } },
             orderItems: { include: { product: true } }
@@ -3003,7 +3005,6 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
         },
         sales: {
           orderBy: { createdAt: 'desc' },
-          take: 50,
           include: {
             consumerProfile: { select: { fullName: true } },
             saleItems: { include: { product: true } }
@@ -3012,9 +3013,7 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
         creditRequests: {
           orderBy: { createdAt: 'desc' }
         },
-        inventory: {
-          take: 100
-        }
+        inventory: true
       }
     });
 
@@ -3022,22 +3021,62 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
       return res.status(404).json({ success: false, error: 'Retailer not found' });
     }
 
+    // Filter completed/cancelled orders to wholesaler based on Wholesaler's lastSettlementDate
+    const wholesalerSettlementDate = retailer.linkedWholesaler?.lastSettlementDate ? new Date(retailer.linkedWholesaler.lastSettlementDate) : null;
+    const filteredWholesalerCompleted = retailer.orders.filter(o => {
+      const isCompleted = o.status === 'completed' || o.status === 'delivered';
+      if (!isCompleted) return false;
+      if (wholesalerSettlementDate) {
+        return new Date(o.createdAt) > wholesalerSettlementDate;
+      }
+      return true;
+    });
+
+    const filteredWholesalerCancelled = retailer.orders.filter(o => {
+      const isCancelled = o.status === 'cancelled';
+      if (!isCancelled) return false;
+      if (wholesalerSettlementDate) {
+        return new Date(o.createdAt) > wholesalerSettlementDate;
+      }
+      return true;
+    });
+
     // Order statistics (orders TO wholesalers)
     const orderStats = {
       pending: retailer.orders.filter(o => o.status === 'pending').length,
       active: retailer.orders.filter(o => o.status === 'processing' || o.status === 'active').length,
-      completed: retailer.orders.filter(o => o.status === 'completed' || o.status === 'delivered').length,
-      cancelled: retailer.orders.filter(o => o.status === 'cancelled').length,
-      total: retailer.orders.length
+      completed: filteredWholesalerCompleted.length,
+      cancelled: filteredWholesalerCancelled.length,
+      total: retailer.orders.filter(o => o.status === 'pending' || o.status === 'processing' || o.status === 'active').length + filteredWholesalerCompleted.length + filteredWholesalerCancelled.length
     };
+
+    // Filter completed/cancelled sales to customers based on Retailer's lastSettlementDate
+    const retailerSettlementDate = retailer.lastSettlementDate ? new Date(retailer.lastSettlementDate) : null;
+    const filteredCustomerCompleted = retailer.sales.filter(s => {
+      const isCompleted = s.status === 'completed' || s.status === 'delivered';
+      if (!isCompleted) return false;
+      if (retailerSettlementDate) {
+        return new Date(s.createdAt) > retailerSettlementDate;
+      }
+      return true;
+    });
+
+    const filteredCustomerCancelled = retailer.sales.filter(s => {
+      const isCancelled = s.status === 'cancelled';
+      if (!isCancelled) return false;
+      if (retailerSettlementDate) {
+        return new Date(s.createdAt) > retailerSettlementDate;
+      }
+      return true;
+    });
 
     // Sales statistics (sales TO consumers)
     const salesStats = {
       pending: retailer.sales.filter(s => s.status === 'pending').length,
-      completed: retailer.sales.filter(s => s.status === 'completed' || s.status === 'delivered').length,
-      cancelled: retailer.sales.filter(s => s.status === 'cancelled').length,
-      total: retailer.sales.length,
-      totalRevenue: retailer.sales.reduce((sum, s) => sum + s.totalAmount, 0)
+      completed: filteredCustomerCompleted.length,
+      cancelled: filteredCustomerCancelled.length,
+      total: retailer.sales.filter(s => s.status === 'pending').length + filteredCustomerCompleted.length + filteredCustomerCancelled.length,
+      totalRevenue: filteredCustomerCompleted.reduce((sum, s) => sum + s.totalAmount, 0)
     };
 
     // Calculate spendable credit (Wholesaler Credit) from loans matching retailer portal AddStockPage.tsx
@@ -3240,15 +3279,12 @@ export const getWholesalerAccountDetails = async (req: AuthRequest, res: Respons
         },
         receivedOrders: {
           orderBy: { createdAt: 'desc' },
-          take: 50,
           include: {
             retailerProfile: { select: { shopName: true } },
             orderItems: { include: { product: true } }
           }
         },
-        inventory: {
-          take: 100
-        },
+        inventory: true,
         suppliers: {
           include: {
             supplierPayments: {

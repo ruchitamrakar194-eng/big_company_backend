@@ -95,7 +95,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     );
 
     const stockValueWholesaler = allProducts.reduce((sum, p) =>
-      sum + (p.stock * p.price), 0
+      sum + (p.stock * (p.price === 0 ? (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0)) : p.price)), 0
     );
 
     // Count pending orders (not limited by settlement date so they don't disappear)
@@ -318,7 +318,7 @@ export const getInventoryStats = async (req: AuthRequest, res: Response) => {
     // Calculate statistics
     const totalProducts = products.length;
     const stockValueSupplier = products.reduce((sum, p) => sum + (p.stock * (p.costPrice || 0)), 0);
-    const stockValueWholesaler = products.reduce((sum, p) => sum + (p.stock * p.price), 0);
+    const stockValueWholesaler = products.reduce((sum, p) => sum + (p.stock * (p.price === 0 ? (p.costPrice || 0) : p.price)), 0);
     const stockProfitMargin = stockValueWholesaler - stockValueSupplier;
     const lowStockCount = products.filter(p => p.lowStockThreshold && p.stock > 0 && p.stock <= p.lowStockThreshold).length;
     const outOfStockCount = products.filter(p => p.stock === 0).length;
