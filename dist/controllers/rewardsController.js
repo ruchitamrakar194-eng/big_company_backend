@@ -340,7 +340,7 @@ exports.redeemRewards = redeemRewards;
 // Send rewards to meter POINTER
 const sendToMeter = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { meterId, amount, meterType } = req.body;
+        const { meterId, amount, meterType, phone } = req.body;
         if (!meterId || amount === undefined || amount === null) {
             return res.status(400).json({ success: false, error: 'Meter ID and amount are required.' });
         }
@@ -375,7 +375,8 @@ const sendToMeter = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 amount: roundedAmount,
                 paymentMethod: 'gas_rewards',
                 isVendByUnit: true, // Rewards are sent in m3
-                provider: meterType === 'LORA_NB' ? 'stronpower' : 'zhongyi'
+                provider: meterType === 'LORA_NB' ? 'stronpower' : 'zhongyi',
+                phone: phone
             } });
         const { initiateGasMeterRecharge } = yield Promise.resolve().then(() => __importStar(require('./gasMeterRechargeController')));
         return initiateGasMeterRecharge(rechargeReq, res);
