@@ -22,6 +22,13 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
 
+    // Retrieve latest Reset date
+    const resetAlert = await prisma.systemAlert.findFirst({
+      where: { apiName: 'GAS_REPORTING_PERIOD_RESET' },
+      orderBy: { createdAt: 'desc' }
+    });
+    const lastGasResetDate = resetAlert ? new Date(resetAlert.errorMessage) : null;
+
     // 1. Customers
     const customerTotal = await prisma.consumerProfile.count();
     const customerLast24h = await prisma.consumerProfile.count({ where: { user: { createdAt: { gte: last24h } } } });
@@ -30,8 +37,12 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
 
     // 2. Orders & Revenue (Combine B2C Sales and B2B Wholesaler Orders)
     const [sales, wholesaleOrders] = await Promise.all([
-      prisma.sale.findMany(),
-      prisma.order.findMany()
+      prisma.sale.findMany({
+        where: lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {}
+      }),
+      prisma.order.findMany({
+        where: lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {}
+      })
     ]);
 
     const orderTotal = sales.length + wholesaleOrders.length;
@@ -82,11 +93,6 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     const outstandingAmount = Math.round(customerLoanOutstanding + retailerOutstanding);
 
     // 5. Gas (using GasTopup or Sale with gas category)
-    const resetAlert = await prisma.systemAlert.findFirst({
-      where: { apiName: 'GAS_REPORTING_PERIOD_RESET' },
-      orderBy: { createdAt: 'desc' }
-    });
-    const lastGasResetDate = resetAlert ? new Date(resetAlert.errorMessage) : null;
 
     const gasTopups = await prisma.gasTopup.findMany({
       where: { 
@@ -110,16 +116,14 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     const wholesalerTotal = await prisma.wholesalerProfile.count();
     const wholesalerActive = await prisma.wholesalerProfile.count({ where: { user: { isActive: true } } });
 
-    // 8. System-wide Wallets (Consumer & Retailer cash wallet balances + secondary wallets)
+    // 8. System-wide Wallets (Consumer dashboard & Retailer capital wallets)
     const consumerWalletSum = await prisma.consumerProfile.aggregate({ _sum: { walletBalance: true } });
-    const retailerWalletSum = await prisma.retailerProfile.aggregate({ _sum: { walletBalance: true } });
     const secondaryWalletsSum = await prisma.wallet.aggregate({
       where: { type: 'capital' },
       _sum: { balance: true }
     });
     const totalWalletBalance = Math.round(
       (consumerWalletSum._sum.walletBalance || 0) +
-      (retailerWalletSum._sum.walletBalance || 0) +
       (secondaryWalletsSum._sum.balance || 0)
     );
 
@@ -130,7 +134,15 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     // 10. System-wide Inventory (Stock & evaluated cost value)
     const allProducts = await prisma.product.findMany();
     const totalProductsCount = allProducts.length;
-    const totalInventoryValue = Math.round(allProducts.reduce((sum, p) => sum + (p.stock * (p.costPrice || p.price || 0)), 0));
+    const totalInventoryValue = Math.round(
+      allProducts.reduce((sum, p) => {
+        if (p.retailerId !== null) {
+          return sum + (p.stock * (p.costPrice || 0));
+        }
+        const cost = p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0);
+        return sum + (p.stock * cost);
+      }, 0)
+    );
 
     // Recent Activity - Merge Sales, New Customers, Loans, and Gas Topups
     const [recentSales, recentConsumers, recentLoans, recentGas] = await Promise.all([
