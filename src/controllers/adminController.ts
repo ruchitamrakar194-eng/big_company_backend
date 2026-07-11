@@ -436,8 +436,7 @@ export const getCustomers = async (req: AuthRequest, res: Response) => {
         gasRewards: true,
         sales: {
           include: {
-            saleItems: true,
-            retailerProfile: true
+            saleItems: true
           }
         },
         gasTopups: {
@@ -451,6 +450,9 @@ export const getCustomers = async (req: AuthRequest, res: Response) => {
       }
     });
 
+    const retailerProfiles = await prisma.retailerProfile.findMany();
+    const retailerMap = new Map(retailerProfiles.map(rp => [rp.id, rp]));
+
     const formattedCustomers = customers.map(customer => {
       const activeSales = customer.sales.filter(sale => {
         // Exclude gas top-up purchases (which have no saleItems)
@@ -459,7 +461,8 @@ export const getCustomers = async (req: AuthRequest, res: Response) => {
         }
 
         // Exclude sales before the retailer's lastSettlementDate
-        const settlementDate = sale.retailerProfile?.lastSettlementDate;
+        const retailer = retailerMap.get(sale.retailerId);
+        const settlementDate = retailer?.lastSettlementDate;
         if (settlementDate) {
           return new Date(sale.createdAt) >= new Date(settlementDate);
         }
