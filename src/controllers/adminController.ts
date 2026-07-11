@@ -4505,7 +4505,7 @@ export const endGasPeriod = async (req: AuthRequest, res: Response) => {
     // Reset remaining units on all meters to zero
     await prisma.gasMeter.updateMany({
       data: {
-        current_units: 0
+        currentUnits: 0
       }
     });
 
