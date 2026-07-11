@@ -3136,6 +3136,10 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
     const loansWithCredit = (retailer.retailerLoans || []).filter(l => (l.amount || 0) > 0);
     const totalSpendableCredit = loansWithCredit.reduce((sum, l) => sum + (l.amount || 0), 0);
 
+    // Outstanding loan balance — sum of remainingAmount on active loans (matches retailer WalletPage Credit tab)
+    const activeLoans = (retailer.retailerLoans || []).filter((l: any) => l.status?.toLowerCase() === 'active');
+    const outstandingLoanBalance = activeLoans.reduce((sum: number, l: any) => sum + (l.remainingAmount || 0), 0);
+
     // Credit summary
     const creditSummary = retailer.credit ? {
       creditLimit: retailer.credit.creditLimit,
@@ -3146,6 +3150,24 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
       usedCredit: 0,
       availableCredit: totalSpendableCredit > 0 ? totalSpendableCredit : retailer.creditLimit
     };
+
+    // Profit Wallet — realized profit from sales (sellingPrice - costPrice) matching retailer dashboard
+    const systemConfig = await prisma.systemConfig.findFirst();
+    const retailerMarkup = (systemConfig as any)?.retailerMarkup || 20;
+    let totalSalesRevenue = 0;
+    let totalSalesCost = 0;
+    for (const sale of retailer.sales) {
+      if (sale.status === 'cancelled') continue;
+      for (const item of (sale as any).saleItems || []) {
+        const revenue = (item.price || 0) * (item.quantity || 0);
+        const cost = item.product?.costPrice && item.product.costPrice > 0
+          ? item.product.costPrice
+          : (item.price || 0) / (1 + retailerMarkup / 100);
+        totalSalesRevenue += revenue;
+        totalSalesCost += cost * (item.quantity || 0);
+      }
+    }
+    const profitWallet = Math.max(0, totalSalesRevenue - totalSalesCost);
 
     // Last order details
     const lastOrder = retailer.orders.length > 0 ? retailer.orders[0] : null;
@@ -3165,6 +3187,8 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
           createdAt: retailer.user.createdAt
         },
         walletBalance: retailer.walletBalance,
+        profitWallet,
+        outstandingLoanBalance,
         creditSummary,
         orderStats,
         orders: retailer.orders,
