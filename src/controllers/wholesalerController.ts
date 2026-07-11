@@ -311,14 +311,48 @@ export const getInventoryStats = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Wholesaler profile not found' });
     }
 
+    // Auto-correct any products with price = 0
+    const zeroPriceProducts = await prisma.product.findMany({
+      where: {
+        wholesalerId: wholesalerProfile.id,
+        price: 0
+      }
+    });
+
+    if (zeroPriceProducts.length > 0) {
+      const config = await prisma.systemConfig.findFirst();
+      const wholesalerMarkupPct = (config as any)?.wholesalerMarkup || 20;
+      const exciseDutyRatePct = (config as any)?.exciseDutyRate || 10;
+
+      for (const p of zeroPriceProducts) {
+        const cost = p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0);
+        if (cost > 0) {
+          const pricingResult = calculateWholesalePrice(
+            cost,
+            wholesalerMarkupPct,
+            p.taxType || 'B',
+            exciseDutyRatePct
+          );
+          await prisma.product.update({
+            where: { id: p.id },
+            data: { price: pricingResult.finalInvoicePrice }
+          });
+        }
+      }
+    }
+
     const products = await prisma.product.findMany({
       where: { wholesalerId: wholesalerProfile.id }
     });
 
     // Calculate statistics
     const totalProducts = products.length;
-    const stockValueSupplier = products.reduce((sum, p) => sum + (p.stock * (p.costPrice || 0)), 0);
-    const stockValueWholesaler = products.reduce((sum, p) => sum + (p.stock * (p.price === 0 ? (p.costPrice || 0) : p.price)), 0);
+    const stockValueSupplier = products.reduce((sum, p) =>
+      sum + (p.stock * (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0))), 0
+    );
+    const stockValueWholesaler = products.reduce((sum, p) =>
+      sum + (p.stock * (p.price === 0 ? (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0)) : p.price)), 0
+    );
     const stockProfitMargin = stockValueWholesaler - stockValueSupplier;
     const lowStockCount = products.filter(p => p.lowStockThreshold && p.stock > 0 && p.stock <= p.lowStockThreshold).length;
     const outOfStockCount = products.filter(p => p.stock === 0).length;
@@ -783,11 +817,38 @@ export const updatePrice = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Wholesaler profile not found' });
     }
 
+    const currentProduct = await prisma.product.findUnique({
+      where: { id: Number(id), wholesalerId: wholesalerProfile.id }
+    });
+
+    if (!currentProduct) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const parsedCost = cost_price ? parseFloat(cost_price) : undefined;
+    let finalCalculatedPrice = wholesale_price ? parseFloat(wholesale_price) : undefined;
+
+    if (parsedCost !== undefined) {
+      const resolvedTaxType = currentProduct.taxType || 'B';
+      const config = await prisma.systemConfig.findFirst();
+      const wholesalerMarkupPct = (config as any)?.wholesalerMarkup || 20;
+      const exciseDutyRatePct = (config as any)?.exciseDutyRate || 10;
+
+      const pricingResult = calculateWholesalePrice(
+        parsedCost,
+        wholesalerMarkupPct,
+        resolvedTaxType,
+        exciseDutyRatePct
+      );
+      finalCalculatedPrice = pricingResult.finalInvoicePrice;
+    }
+
     const product = await prisma.product.update({
       where: { id: Number(id), wholesalerId: wholesalerProfile.id },
       data: {
-        price: wholesale_price ? parseFloat(wholesale_price) : undefined,
-        costPrice: cost_price ? parseFloat(cost_price) : undefined
+        price: finalCalculatedPrice,
+        costPrice: parsedCost,
+        supplierCost: parsedCost
       }
     });
 
