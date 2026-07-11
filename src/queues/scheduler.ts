@@ -3,6 +3,7 @@ import { emailQueue } from './email.queue';
 import { ReportService } from '../services/report.service';
 import { TemplateService } from '../services/template.service';
 
+
 /**
  * Initializes all system-wide scheduled jobs
  */
@@ -56,10 +57,10 @@ export const processScheduledTask = async (jobName: string) => {
   if (jobName === 'retailer-daily-reports') {
     console.log('🏪 [Scheduler] Processing Retailer Daily Reports...');
     const retailers = await prisma.retailerProfile.findMany({ include: { user: true } });
-    
+
     for (const retailer of retailers) {
       if (!retailer.user?.email) continue;
-      
+
       const reportData = await ReportService.getRetailerDailyReport(retailer.id);
       await emailQueue.add('retailer-daily-report', {
         to: retailer.user.email,
@@ -91,7 +92,7 @@ export const processScheduledTask = async (jobName: string) => {
   if (jobName === 'pending-order-watcher') {
     console.log('⏳ [Scheduler] Checking for pending orders (>20 mins)...');
     const orders = await ReportService.getPendingOrdersOlderThan(20);
-    
+
     for (const order of orders) {
       const email = order.retailerProfile?.user?.email;
       if (email) {
@@ -179,12 +180,12 @@ export const processScheduledTask = async (jobName: string) => {
   if (jobName === 'monthly-profit-report') {
     console.log('💰 [Scheduler] Generating Monthly Profit Transfer Reports...');
     const retailers = await prisma.retailerProfile.findMany({ include: { user: true } });
-    
+
     for (const retailer of retailers) {
       if (!retailer.user?.email) continue;
-      
+
       const profitData = await ReportService.getRetailerMonthlyReport(retailer.id);
-      
+
       // Only send if there was profit
       if (parseFloat(profitData.transfer_amount.replace(/,/g, '')) > 0) {
         await emailQueue.add('monthly-profit-report', {
