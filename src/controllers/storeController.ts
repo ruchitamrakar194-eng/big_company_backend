@@ -770,12 +770,23 @@ export const getMyOrders = async (req: AuthRequest, res: Response) => {
 
     const retailerIds = Array.from(new Set(sales.map(s => s.retailerId)));
     const retailers = await prisma.retailerProfile.findMany({
-      where: { id: { in: retailerIds } },
-      include: {
-        user: { select: { phone: true } }
-      }
+      where: { id: { in: retailerIds } }
     });
-    const retailerMap = new Map(retailers.map(r => [r.id, r]));
+
+    const userIds = retailers.map(r => r.userId);
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, phone: true }
+    });
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    const retailerMap = new Map(retailers.map(r => [
+      r.id,
+      {
+        ...r,
+        phone: userMap.get(r.userId)?.phone || 'N/A'
+      }
+    ]));
 
     // 2. Fetch CustomerOrders (Gas/Other)
     const otherOrders = await prisma.customerOrder.findMany({
@@ -794,7 +805,7 @@ export const getMyOrders = async (req: AuthRequest, res: Response) => {
           id: sale.retailerId,
           name: retailerProfile?.shopName || 'Unknown Retailer',
           location: retailerProfile?.address || 'Unknown Location',
-          phone: retailerProfile?.user?.phone || 'N/A'
+          phone: retailerProfile?.phone || 'N/A'
         },
         items: sale.saleItems.map(item => ({
           id: item.id,
