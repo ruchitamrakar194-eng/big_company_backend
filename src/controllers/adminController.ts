@@ -3133,6 +3133,23 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
       return true;
     });
 
+    // Fetch gas rewards given
+    const gasRewardsAggregate = await prisma.gasReward.aggregate({
+      where: {
+        sale: {
+          retailerId: retailer.id
+        },
+        ...(retailerSettlementDate ? ({ createdAt: { gte: retailerSettlementDate } } as any) : {})
+      },
+      _sum: {
+        units: true
+      }
+    });
+
+    const systemConfig = await prisma.systemConfig.findFirst();
+    const gasRewardsM3 = gasRewardsAggregate._sum.units || 0;
+    const gasRewardsRwf = Math.round(gasRewardsM3 * (systemConfig?.gasPricePerM3 || 6500));
+
     // Sales statistics (sales TO consumers)
     const salesStats = {
       pending:    retailer.sales.filter(s => s.status === 'pending').length,
@@ -3146,6 +3163,8 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
       dashboardWalletRevenue: filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'dashboard_wallet' || s.paymentMethod === 'wallet').reduce((sum, s) => sum + s.totalAmount, 0),
       creditWalletRevenue:    filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'credit_wallet'    || s.paymentMethod === 'credit').reduce((sum, s) => sum + s.totalAmount, 0),
       mobileMoneyRevenue:     filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'mobile_money').reduce((sum, s) => sum + s.totalAmount, 0),
+      gasRewardsM3,
+      gasRewardsRwf,
     };
 
     // Calculate spendable credit (Wholesaler Credit) from loans matching retailer portal AddStockPage.tsx
@@ -3169,7 +3188,6 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
 
     // Profit Wallet — realized profit from sales (sellingPrice - costPrice) matching retailer dashboard
     // Only includes sales after lastSettlementDate (same reset behavior as retailer's own Profit Wallet tab)
-    const systemConfig = await prisma.systemConfig.findFirst();
     const retailerMarkup = (systemConfig as any)?.retailerMarkup || 20;
     const settlementDateForProfit = retailer.lastSettlementDate ? new Date(retailer.lastSettlementDate) : null;
     let totalSalesRevenue = 0;
