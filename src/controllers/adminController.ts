@@ -3420,14 +3420,46 @@ export const getWholesalerAccountDetails = async (req: AuthRequest, res: Respons
     }
 
     // Order statistics
+    const dateFilter = wholesaler.lastSettlementDate ? { gte: wholesaler.lastSettlementDate } : undefined;
+    const dateFilteredOrders = wholesaler.receivedOrders.filter(o => !dateFilter || new Date(o.createdAt) >= new Date(dateFilter.gte));
+    const completedOrders = dateFilteredOrders.filter(o => o.status === 'delivered');
+    const totalRevenue = completedOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+
     const orderStats = {
       pending: wholesaler.receivedOrders.filter(o => o.status === 'pending').length,
       active: wholesaler.receivedOrders.filter(o => o.status === 'processing').length,
-      completed: wholesaler.receivedOrders.filter(o => o.status === 'completed').length,
+      completed: wholesaler.receivedOrders.filter(o => o.status === 'completed' || o.status === 'delivered').length,
       cancelled: wholesaler.receivedOrders.filter(o => o.status === 'cancelled').length,
       total: wholesaler.receivedOrders.length,
-      totalRevenue: wholesaler.receivedOrders.reduce((sum, o) => sum + o.totalAmount, 0)
+      totalRevenue: totalRevenue
     };
+
+    // Calculate profit wallet (realized profit from confirmed sales/revenue) matching wholesaler dashboard
+    const systemConfig = await prisma.systemConfig.findFirst();
+    const wholesalerMarkupPct = (systemConfig as any)?.wholesalerMarkup || 20;
+
+    const orderItems = await prisma.orderItem.findMany({
+      where: {
+        order: { 
+          wholesalerId: wholesaler.id,
+          ...(dateFilter ? { createdAt: dateFilter } : {})
+        }
+      },
+      include: { product: true }
+    });
+
+    const confirmedOrderItems = orderItems.filter(item => {
+      const order = wholesaler.receivedOrders.find(o => o.id === item.orderId);
+      return order && ['confirmed', 'shipped', 'delivered'].includes(order.status);
+    });
+
+    const profitWallet = confirmedOrderItems.reduce((sum, item) => {
+      const rawCost = item.product.supplierCost !== null && item.product.supplierCost !== undefined && item.product.supplierCost > 0
+        ? item.product.supplierCost
+        : (item.product.costPrice || 0);
+      const cost = rawCost > 0 ? rawCost : item.price / (1 + wholesalerMarkupPct / 100);
+      return sum + (item.quantity * (item.price - cost));
+    }, 0);
 
     // Last order
     const lastOrder = wholesaler.receivedOrders.length > 0 ? wholesaler.receivedOrders[0] : null;
@@ -3467,6 +3499,7 @@ export const getWholesalerAccountDetails = async (req: AuthRequest, res: Respons
         products: wholesaler.inventory,
         suppliers: wholesaler.suppliers,
         supplierPayments: wholesaler.supplierPayments,
+        profitWallet,
         lastOrder
       }
     });
