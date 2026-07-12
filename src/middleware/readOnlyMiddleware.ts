@@ -45,12 +45,18 @@ export const enforceReadOnly = (req: AuthRequest, res: Response, next: NextFunct
   
   // Allow loan approval and rejection even in read-only mode for demonstrations
   // Also allow verification, status updates and credit limit changes
+  // Also allow admin proxy actions on wholesaler orders and inventory
   const isExcludedFromReadOnly = 
     fullPath.endsWith('/approve') || 
     fullPath.endsWith('/reject') ||
     fullPath.endsWith('/verify') ||
     fullPath.endsWith('/status') ||
-    fullPath.endsWith('/credit-limit');
+    fullPath.endsWith('/credit-limit') ||
+    fullPath.endsWith('/confirm') ||
+    fullPath.endsWith('/ship') ||
+    fullPath.endsWith('/stock') ||
+    fullPath.includes('/wholesalers/') && fullPath.includes('/orders/') ||
+    fullPath.includes('/wholesalers/') && fullPath.includes('/inventory/');
 
   const isReadOnlyEndpoint = targetEndpoints.some(endpoint => 
     fullPath.startsWith(endpoint)

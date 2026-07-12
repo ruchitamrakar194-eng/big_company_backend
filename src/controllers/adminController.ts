@@ -35,13 +35,20 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     const customerLast7d = await prisma.consumerProfile.count({ where: { user: { createdAt: { gte: last7d } } } });
     const customerLast30d = await prisma.consumerProfile.count({ where: { user: { createdAt: { gte: last30d } } } });
 
+    // Retrieve latest Retailer Profit Invoice Reset date (for Orders and Revenue)
+    const profitResetAlert = await prisma.systemAlert.findFirst({
+      where: { apiName: 'RETAILER_PROFIT_INVOICE_RESET' },
+      orderBy: { createdAt: 'desc' }
+    });
+    const lastProfitResetDate = profitResetAlert ? new Date(profitResetAlert.errorMessage) : null;
+
     // 2. Orders & Revenue (Combine B2C Sales and B2B Wholesaler Orders)
     const [sales, wholesaleOrders] = await Promise.all([
       prisma.sale.findMany({
-        where: lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {}
+        where: lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {}
       }),
       prisma.order.findMany({
-        where: lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {}
+        where: lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {}
       })
     ]);
 
@@ -95,7 +102,7 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     // 5. Gas (using GasTopup or Sale with gas category)
 
     const gasTopups = await prisma.gasTopup.findMany({
-      where: { 
+      where: {
         status: { in: ['completed', 'success'] },
         ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
       }
@@ -1696,7 +1703,7 @@ export const getProducts = async (req: AuthRequest, res: Response) => {
       const primaryWholesaler = entry.wholesalerProds[0];
       const primaryRetailer = entry.retailerProds[0];
       const representative = primaryWholesaler || primaryRetailer;
-      
+
       const copy = { ...representative };
 
       // Sum stock across all records
@@ -2934,8 +2941,8 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
 
     // Calculate actual total gas top-ups stats
     const totalGasTopupsSum = await prisma.gasTopup.aggregate({
-      where: { 
-        consumerId: customer.id, 
+      where: {
+        consumerId: customer.id,
         status: { in: ['completed', 'success'] },
         ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
       },
@@ -2944,7 +2951,7 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
     });
 
     const totalGasRewardsSum = await prisma.gasReward.aggregate({
-      where: { 
+      where: {
         consumerId: customer.id,
         ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
       },
@@ -3105,7 +3112,7 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
 
     // Filter sales to customers since last settlement date
     const retailerSettlementDate = retailer.lastSettlementDate ? new Date(retailer.lastSettlementDate) : null;
-    
+
     // For revenue: retailer dashboard counts all non-cancelled sales since last settlement date
     const filteredCustomerRevenueSales = retailer.sales.filter(s => {
       if (s.status === 'cancelled') return false;
@@ -3152,17 +3159,17 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
 
     // Sales statistics (sales TO consumers)
     const salesStats = {
-      pending:    retailer.sales.filter(s => s.status === 'pending').length,
+      pending: retailer.sales.filter(s => s.status === 'pending').length,
       processing: retailer.sales.filter(s => s.status === 'processing' || s.status === 'confirmed').length,
-      shipped:    retailer.sales.filter(s => s.status === 'shipped').length,
-      ready:      retailer.sales.filter(s => s.status === 'ready').length,
-      completed:  filteredCustomerCompleted.length,
-      cancelled:  filteredCustomerCancelled.length,
+      shipped: retailer.sales.filter(s => s.status === 'shipped').length,
+      ready: retailer.sales.filter(s => s.status === 'ready').length,
+      completed: filteredCustomerCompleted.length,
+      cancelled: filteredCustomerCancelled.length,
       total: retailer.sales.filter(s => s.status === 'pending').length + filteredCustomerCompleted.length + filteredCustomerCancelled.length,
-      totalRevenue:           filteredCustomerRevenueSales.reduce((sum, s) => sum + s.totalAmount, 0),
+      totalRevenue: filteredCustomerRevenueSales.reduce((sum, s) => sum + s.totalAmount, 0),
       dashboardWalletRevenue: filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'dashboard_wallet' || s.paymentMethod === 'wallet').reduce((sum, s) => sum + s.totalAmount, 0),
-      creditWalletRevenue:    filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'credit_wallet'    || s.paymentMethod === 'credit').reduce((sum, s) => sum + s.totalAmount, 0),
-      mobileMoneyRevenue:     filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'mobile_money').reduce((sum, s) => sum + s.totalAmount, 0),
+      creditWalletRevenue: filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'credit_wallet' || s.paymentMethod === 'credit').reduce((sum, s) => sum + s.totalAmount, 0),
+      mobileMoneyRevenue: filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'mobile_money').reduce((sum, s) => sum + s.totalAmount, 0),
       gasRewardsM3,
       gasRewardsRwf,
     };
@@ -3440,7 +3447,7 @@ export const getWholesalerAccountDetails = async (req: AuthRequest, res: Respons
 
     const orderItems = await prisma.orderItem.findMany({
       where: {
-        order: { 
+        order: {
           wholesalerId: wholesaler.id,
           ...(dateFilter ? { createdAt: dateFilter } : {})
         }
@@ -3505,6 +3512,226 @@ export const getWholesalerAccountDetails = async (req: AuthRequest, res: Respons
     });
   } catch (error: any) {
     console.error('Get Wholesaler Account Details Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ==========================================
+// ADMIN PROXY — WHOLESALER ORDER ACTIONS
+// Admin can perform the same order actions as the wholesaler,
+// identified by wholesaler profile ID from the URL.
+// ==========================================
+
+export const adminConfirmWholesalerOrder = async (req: AuthRequest, res: Response) => {
+  try {
+    const { wId, orderId } = req.params;
+
+    const wholesalerProfile = await prisma.wholesalerProfile.findUnique({
+      where: { id: Number(wId) },
+      include: { user: true }
+    });
+    if (!wholesalerProfile) {
+      return res.status(404).json({ success: false, error: 'Wholesaler not found' });
+    }
+
+    const order = await prisma.order.findUnique({ where: { id: Number(orderId) } });
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (order.wholesalerId !== wholesalerProfile.id) {
+      return res.status(403).json({ success: false, error: 'Order does not belong to this wholesaler' });
+    }
+    if (order.status !== 'pending') {
+      return res.status(400).json({ success: false, error: `Cannot confirm order with status: ${order.status}` });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const orderWithItems = await tx.order.findUnique({
+        where: { id: Number(orderId) },
+        include: { orderItems: { include: { product: true } } }
+      });
+      if (!orderWithItems) throw new Error('Order not found');
+
+      for (const item of orderWithItems.orderItems) {
+        if (!item.product) throw new Error(`Product not found for item ${item.productId}`);
+        if (item.product.stock < item.quantity) {
+          throw new Error(`Insufficient stock for ${item.product.name}. Available: ${item.product.stock}, Required: ${item.quantity}`);
+        }
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { stock: { decrement: item.quantity } }
+        });
+      }
+
+      const updatedOrder = await tx.order.update({
+        where: { id: Number(orderId) },
+        data: { status: 'confirmed' },
+        include: { orderItems: { include: { product: true } }, retailerProfile: { include: { user: true } } }
+      });
+
+      return updatedOrder;
+    }, { timeout: 15000 });
+
+    res.json({ success: true, order: result, message: 'Order confirmed and stock deducted successfully' });
+  } catch (error: any) {
+    console.error('Admin Confirm Wholesaler Order Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const adminRejectWholesalerOrder = async (req: AuthRequest, res: Response) => {
+  try {
+    const { wId, orderId } = req.params;
+    const { reason } = req.body;
+
+    const wholesalerProfile = await prisma.wholesalerProfile.findUnique({ where: { id: Number(wId) } });
+    if (!wholesalerProfile) return res.status(404).json({ success: false, error: 'Wholesaler not found' });
+
+    const order = await prisma.order.findUnique({ where: { id: Number(orderId) } });
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (order.wholesalerId !== wholesalerProfile.id) {
+      return res.status(403).json({ success: false, error: 'Order does not belong to this wholesaler' });
+    }
+    if (!['pending', 'confirmed'].includes(order.status)) {
+      return res.status(400).json({ success: false, error: `Cannot reject order with status: ${order.status}` });
+    }
+
+    const updatedOrder = await prisma.order.update({
+      where: { id: Number(orderId) },
+      data: { status: 'rejected', rejectionReason: reason || 'Rejected by admin' } as any
+    });
+
+    res.json({ success: true, order: updatedOrder, message: 'Order rejected successfully' });
+  } catch (error: any) {
+    console.error('Admin Reject Wholesaler Order Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const adminShipWholesalerOrder = async (req: AuthRequest, res: Response) => {
+  try {
+    const { wId, orderId } = req.params;
+    const shipperName = req.body.shipperName || req.body.shipper_name;
+    const shipperPhone = req.body.shipperPhone || req.body.shipper_phone;
+    const vehiclePlate = req.body.vehiclePlate || req.body.vehicle_plate;
+    const delivery_notes = req.body.delivery_notes || req.body.deliveryNotes;
+    const tracking_number = req.body.tracking_number || req.body.trackingNumber;
+
+    if (!shipperName || !shipperPhone || !vehiclePlate) {
+      return res.status(400).json({ success: false, error: 'Shipper Name, Phone, and Vehicle Plate are required.' });
+    }
+
+    const wholesalerProfile = await prisma.wholesalerProfile.findUnique({ where: { id: Number(wId) } });
+    if (!wholesalerProfile) return res.status(404).json({ success: false, error: 'Wholesaler not found' });
+
+    const order = await prisma.order.findUnique({ where: { id: Number(orderId) } });
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (order.wholesalerId !== wholesalerProfile.id) {
+      return res.status(403).json({ success: false, error: 'Order does not belong to this wholesaler' });
+    }
+    if (order.status !== 'confirmed') {
+      return res.status(400).json({ success: false, error: `Cannot ship order with status: ${order.status}. Order must be confirmed first.` });
+    }
+
+    const updatedOrder = await prisma.order.update({
+      where: { id: Number(orderId) },
+      data: { status: 'shipped', shipperName, shipperPhone, vehiclePlate } as any
+    });
+
+    res.json({ success: true, order: updatedOrder, message: 'Order shipped successfully' });
+  } catch (error: any) {
+    console.error('Admin Ship Wholesaler Order Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ==========================================
+// ADMIN PROXY — WHOLESALER INVENTORY ACTIONS
+// ==========================================
+
+export const adminUpdateWholesalerProduct = async (req: AuthRequest, res: Response) => {
+  try {
+    const { wId, productId } = req.params;
+    const { name, category, unit, low_stock_threshold, invoice_number, barcode, description, image } = req.body;
+
+    const wholesalerProfile = await prisma.wholesalerProfile.findUnique({ where: { id: Number(wId) } });
+    if (!wholesalerProfile) return res.status(404).json({ success: false, error: 'Wholesaler not found' });
+
+    const currentProduct = await prisma.product.findUnique({
+      where: { id: Number(productId), wholesalerId: wholesalerProfile.id }
+    });
+    if (!currentProduct) return res.status(404).json({ success: false, error: 'Product not found' });
+
+    let imageUrl = image;
+    if (image && image.startsWith('data:image')) {
+      const { uploadImage } = await import('../utils/cloudinary');
+      imageUrl = await uploadImage(image);
+    }
+
+    const product = await prisma.product.update({
+      where: { id: Number(productId), wholesalerId: wholesalerProfile.id },
+      data: {
+        name,
+        category,
+        unit,
+        lowStockThreshold: low_stock_threshold ? parseInt(low_stock_threshold) : undefined,
+        invoiceNumber: invoice_number,
+        barcode,
+        description,
+        image: imageUrl,
+      } as any
+    });
+
+    res.json({ success: true, product });
+  } catch (error: any) {
+    console.error('Admin Update Wholesaler Product Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const adminUpdateWholesalerStock = async (req: AuthRequest, res: Response) => {
+  try {
+    const { wId, productId } = req.params;
+    const { quantity, type, reason } = req.body;
+
+    const wholesalerProfile = await prisma.wholesalerProfile.findUnique({ where: { id: Number(wId) } });
+    if (!wholesalerProfile) return res.status(404).json({ success: false, error: 'Wholesaler not found' });
+
+    const currentProduct = await prisma.product.findUnique({
+      where: { id: Number(productId), wholesalerId: wholesalerProfile.id }
+    });
+    if (!currentProduct) return res.status(404).json({ success: false, error: 'Product not found' });
+
+    let newStock = currentProduct.stock;
+    const amount = parseInt(quantity);
+    if (type === 'add') newStock += amount;
+    else if (type === 'remove') newStock = Math.max(0, newStock - amount);
+    else if (type === 'set') newStock = amount;
+
+    const product = await prisma.product.update({
+      where: { id: Number(productId) },
+      data: { stock: newStock }
+    });
+
+    res.json({ success: true, product });
+  } catch (error: any) {
+    console.error('Admin Update Wholesaler Stock Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const adminDeleteWholesalerProduct = async (req: AuthRequest, res: Response) => {
+  try {
+    const { wId, productId } = req.params;
+
+    const wholesalerProfile = await prisma.wholesalerProfile.findUnique({ where: { id: Number(wId) } });
+    if (!wholesalerProfile) return res.status(404).json({ success: false, error: 'Wholesaler not found' });
+
+    await prisma.product.delete({
+      where: { id: Number(productId), wholesalerId: wholesalerProfile.id }
+    });
+
+    res.json({ success: true, message: 'Product deleted successfully' });
+  } catch (error: any) {
+    console.error('Admin Delete Wholesaler Product Error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -4420,6 +4647,7 @@ export const generateAdminProfitInvoice = async (req: AuthRequest, res: Response
       recipientType,
       recipientId,
       recipientName,
+      totalOrders,
       totalRevenue,
       grossProfit,
       tax,
@@ -4445,6 +4673,7 @@ export const generateAdminProfitInvoice = async (req: AuthRequest, res: Response
     const data: any = {
       recipientType,
       recipientName,
+      totalOrders: Number(totalOrders) || 0,
       totalRevenue: Number(totalRevenue) || 0,
       grossProfit: Number(grossProfit) || 0,
       tax: Number(tax) || 0,
@@ -4478,6 +4707,15 @@ export const generateAdminProfitInvoice = async (req: AuthRequest, res: Response
         await tx.retailerProfile.update({
           where: { id: Number(recipientId) },
           data: { lastSettlementDate: now }
+        });
+
+        // Log global reset alert for Admin Customer Management dashboard (Total Orders & Total Revenue)
+        await tx.systemAlert.create({
+          data: {
+            apiName: 'RETAILER_PROFIT_INVOICE_RESET',
+            status: 'resolved',
+            errorMessage: now.toISOString()
+          }
         });
       } else {
         await tx.wholesalerProfile.update({
@@ -4568,6 +4806,7 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
       res.json({
         success: true,
         data: {
+          totalOrders: sales.length,
           totalRevenue,
           grossProfit: totalRevenue - totalCost,
           gasRewardsGiven
@@ -4602,6 +4841,7 @@ export const getProfitInvoiceStats = async (req: AuthRequest, res: Response) => 
       res.json({
         success: true,
         data: {
+          totalOrders: orders.length,
           totalRevenue,
           grossProfit: totalRevenue - totalCost,
           gasRewardsGiven: 0

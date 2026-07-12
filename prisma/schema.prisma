@@ -1152,6 +1152,7 @@ model CustomProfitInvoice {
   recipientName     String
   retailerId        Int?
   wholesalerId      Int?
+  totalOrders       Int      @default(0)
   totalRevenue      Float
   grossProfit       Float
   tax               Float

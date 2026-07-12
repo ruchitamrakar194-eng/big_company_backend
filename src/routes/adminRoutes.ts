@@ -52,6 +52,13 @@ import {
   getRetailerAccountDetails,
   getWorkerAccountDetails,
   getWholesalerAccountDetails,
+  // Admin proxy — wholesaler order & inventory actions
+  adminConfirmWholesalerOrder,
+  adminRejectWholesalerOrder,
+  adminShipWholesalerOrder,
+  adminUpdateWholesalerProduct,
+  adminUpdateWholesalerStock,
+  adminDeleteWholesalerProduct,
   // Wholesaler-Retailer linking
   getRetailerWholesalerLinkage,
   linkRetailerToWholesaler,
@@ -201,6 +208,20 @@ router.get('/retailers/:id/account-details', getRetailerAccountDetails);
 router.get('/employees/:id/account-details', getWorkerAccountDetails);
 // Wholesaler account details (READ-ONLY for Admin)
 router.get('/wholesalers/:id/account-details', getWholesalerAccountDetails);
+
+// ==========================================
+// ADMIN PROXY — WHOLESALER ORDER ACTIONS (Admin acts on behalf of wholesaler)
+// ==========================================
+router.post('/wholesalers/:wId/orders/:orderId/confirm', adminConfirmWholesalerOrder);
+router.post('/wholesalers/:wId/orders/:orderId/reject', adminRejectWholesalerOrder);
+router.post('/wholesalers/:wId/orders/:orderId/ship', adminShipWholesalerOrder);
+
+// ==========================================
+// ADMIN PROXY — WHOLESALER INVENTORY ACTIONS
+// ==========================================
+router.put('/wholesalers/:wId/inventory/:productId', adminUpdateWholesalerProduct);
+router.post('/wholesalers/:wId/inventory/:productId/stock', adminUpdateWholesalerStock);
+router.delete('/wholesalers/:wId/inventory/:productId', adminDeleteWholesalerProduct);
 
 // ==========================================
 // WHOLESALER-RETAILER LINKAGE ROUTES
