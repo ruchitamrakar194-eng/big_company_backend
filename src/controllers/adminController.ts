@@ -3103,13 +3103,23 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
       total: retailer.orders.filter(o => o.status === 'pending' || o.status === 'processing' || o.status === 'active').length + filteredWholesalerCompleted.length + filteredWholesalerCancelled.length
     };
 
-    // Filter completed/cancelled sales to customers based on Retailer's lastSettlementDate
+    // Filter sales to customers since last settlement date
     const retailerSettlementDate = retailer.lastSettlementDate ? new Date(retailer.lastSettlementDate) : null;
+    
+    // For revenue: retailer dashboard counts all non-cancelled sales since last settlement date
+    const filteredCustomerRevenueSales = retailer.sales.filter(s => {
+      if (s.status === 'cancelled') return false;
+      if (retailerSettlementDate) {
+        return new Date(s.createdAt) >= retailerSettlementDate;
+      }
+      return true;
+    });
+
     const filteredCustomerCompleted = retailer.sales.filter(s => {
       const isCompleted = s.status === 'completed' || s.status === 'delivered';
       if (!isCompleted) return false;
       if (retailerSettlementDate) {
-        return new Date(s.createdAt) > retailerSettlementDate;
+        return new Date(s.createdAt) >= retailerSettlementDate;
       }
       return true;
     });
@@ -3118,7 +3128,7 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
       const isCancelled = s.status === 'cancelled';
       if (!isCancelled) return false;
       if (retailerSettlementDate) {
-        return new Date(s.createdAt) > retailerSettlementDate;
+        return new Date(s.createdAt) >= retailerSettlementDate;
       }
       return true;
     });
@@ -3132,10 +3142,10 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
       completed:  filteredCustomerCompleted.length,
       cancelled:  filteredCustomerCancelled.length,
       total: retailer.sales.filter(s => s.status === 'pending').length + filteredCustomerCompleted.length + filteredCustomerCancelled.length,
-      totalRevenue:           filteredCustomerCompleted.reduce((sum, s) => sum + s.totalAmount, 0),
-      dashboardWalletRevenue: filteredCustomerCompleted.filter(s => s.paymentMethod === 'dashboard_wallet' || s.paymentMethod === 'wallet').reduce((sum, s) => sum + s.totalAmount, 0),
-      creditWalletRevenue:    filteredCustomerCompleted.filter(s => s.paymentMethod === 'credit_wallet'    || s.paymentMethod === 'credit').reduce((sum, s) => sum + s.totalAmount, 0),
-      mobileMoneyRevenue:     filteredCustomerCompleted.filter(s => s.paymentMethod === 'mobile_money').reduce((sum, s) => sum + s.totalAmount, 0),
+      totalRevenue:           filteredCustomerRevenueSales.reduce((sum, s) => sum + s.totalAmount, 0),
+      dashboardWalletRevenue: filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'dashboard_wallet' || s.paymentMethod === 'wallet').reduce((sum, s) => sum + s.totalAmount, 0),
+      creditWalletRevenue:    filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'credit_wallet'    || s.paymentMethod === 'credit').reduce((sum, s) => sum + s.totalAmount, 0),
+      mobileMoneyRevenue:     filteredCustomerRevenueSales.filter(s => s.paymentMethod === 'mobile_money').reduce((sum, s) => sum + s.totalAmount, 0),
     };
 
     // Calculate spendable credit (Wholesaler Credit) from loans matching retailer portal AddStockPage.tsx
