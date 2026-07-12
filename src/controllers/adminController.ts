@@ -72,7 +72,10 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     const walletTopups = txs.filter(t => t.type === 'top_up').length;
     const gasPurchases = txs.filter(t => t.type === 'gas_payment' || t.type === 'gas_purchase').length;
     const nfcPayments = sales.filter(s => s.paymentMethod === 'nfc' && s.createdAt >= last30d).length;
-    const totalVolume = Math.round(txs.reduce((acc, t) => acc + Math.abs(t.amount), 0));
+    const totalVolume = Math.round(txs
+      .filter(t => lastGasResetDate ? t.createdAt >= lastGasResetDate : true)
+      .reduce((acc, t) => acc + Math.abs(t.amount), 0)
+    );
 
     // 4. Loans (Include both customer loans and retailer credit loans)
     const loans = await prisma.loan.findMany();
