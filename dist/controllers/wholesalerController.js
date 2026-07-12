@@ -295,13 +295,35 @@ const getInventoryStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!wholesalerProfile) {
             return res.status(404).json({ error: 'Wholesaler profile not found' });
         }
+        // Auto-correct any products with price = 0
+        const zeroPriceProducts = yield prisma_1.default.product.findMany({
+            where: {
+                wholesalerId: wholesalerProfile.id,
+                price: 0
+            }
+        });
+        if (zeroPriceProducts.length > 0) {
+            const config = yield prisma_1.default.systemConfig.findFirst();
+            const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
+            const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
+            for (const p of zeroPriceProducts) {
+                const cost = p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0);
+                if (cost > 0) {
+                    const pricingResult = (0, pricingUtils_1.calculateWholesalePrice)(cost, wholesalerMarkupPct, p.taxType || 'B', exciseDutyRatePct);
+                    yield prisma_1.default.product.update({
+                        where: { id: p.id },
+                        data: { price: pricingResult.finalInvoicePrice }
+                    });
+                }
+            }
+        }
         const products = yield prisma_1.default.product.findMany({
             where: { wholesalerId: wholesalerProfile.id }
         });
         // Calculate statistics
         const totalProducts = products.length;
-        const stockValueSupplier = products.reduce((sum, p) => sum + (p.stock * (p.costPrice || 0)), 0);
-        const stockValueWholesaler = products.reduce((sum, p) => sum + (p.stock * (p.price === 0 ? (p.costPrice || 0) : p.price)), 0);
+        const stockValueSupplier = products.reduce((sum, p) => sum + (p.stock * (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0))), 0);
+        const stockValueWholesaler = products.reduce((sum, p) => sum + (p.stock * (p.price === 0 ? (p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0)) : p.price)), 0);
         const stockProfitMargin = stockValueWholesaler - stockValueSupplier;
         const lowStockCount = products.filter(p => p.lowStockThreshold && p.stock > 0 && p.stock <= p.lowStockThreshold).length;
         const outOfStockCount = products.filter(p => p.stock === 0).length;
@@ -679,11 +701,28 @@ const updatePrice = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!wholesalerProfile) {
             return res.status(404).json({ error: 'Wholesaler profile not found' });
         }
+        const currentProduct = yield prisma_1.default.product.findUnique({
+            where: { id: Number(id), wholesalerId: wholesalerProfile.id }
+        });
+        if (!currentProduct) {
+            return res.status(404).json({ error: 'Product not found' });
+        }
+        const parsedCost = cost_price ? parseFloat(cost_price) : undefined;
+        let finalCalculatedPrice = wholesale_price ? parseFloat(wholesale_price) : undefined;
+        if (parsedCost !== undefined) {
+            const resolvedTaxType = currentProduct.taxType || 'B';
+            const config = yield prisma_1.default.systemConfig.findFirst();
+            const wholesalerMarkupPct = (config === null || config === void 0 ? void 0 : config.wholesalerMarkup) || 20;
+            const exciseDutyRatePct = (config === null || config === void 0 ? void 0 : config.exciseDutyRate) || 10;
+            const pricingResult = (0, pricingUtils_1.calculateWholesalePrice)(parsedCost, wholesalerMarkupPct, resolvedTaxType, exciseDutyRatePct);
+            finalCalculatedPrice = pricingResult.finalInvoicePrice;
+        }
         const product = yield prisma_1.default.product.update({
             where: { id: Number(id), wholesalerId: wholesalerProfile.id },
             data: {
-                price: wholesale_price ? parseFloat(wholesale_price) : undefined,
-                costPrice: cost_price ? parseFloat(cost_price) : undefined
+                price: finalCalculatedPrice,
+                costPrice: parsedCost,
+                supplierCost: parsedCost
             }
         });
         res.json({ success: true, product });

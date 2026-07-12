@@ -1158,18 +1158,20 @@ const updateSaleStatus = (req, res) => __awaiter(void 0, void 0, void 0, functio
         const name = shipper_name || shipperName;
         const phone = shipper_phone || shipperPhone;
         const plate = vehicle_plate || vehiclePlate;
-        const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
-            where: { userId: req.user.id }
-        });
-        if (!retailerProfile) {
-            return res.status(404).json({ error: 'Retailer profile not found' });
-        }
         const currentSale = yield prisma_1.default.sale.findUnique({
             where: { id: Number(id) },
             include: { saleItems: true }
         });
-        if (!currentSale || currentSale.retailerId !== retailerProfile.id) {
+        if (!currentSale) {
             return res.status(404).json({ error: 'Order not found' });
+        }
+        if (req.user.role !== 'admin') {
+            const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
+                where: { userId: req.user.id }
+            });
+            if (!retailerProfile || currentSale.retailerId !== retailerProfile.id) {
+                return res.status(404).json({ error: 'Order not found' });
+            }
         }
         // State machine: pending -> confirmed/processing -> shipped -> ready -> completed / delivered
         // MAP: 'confirmed' or 'processing' will be treated as "Proceed" in UI
@@ -1239,18 +1241,20 @@ const cancelSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     try {
         const { id } = req.params;
         const { reason } = req.body;
-        const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
-            where: { userId: req.user.id }
-        });
-        if (!retailerProfile) {
-            return res.status(404).json({ error: 'Retailer profile not found' });
-        }
         const currentSale = yield prisma_1.default.sale.findUnique({
             where: { id: Number(id) },
             include: { saleItems: true }
         });
-        if (!currentSale || currentSale.retailerId !== retailerProfile.id) {
+        if (!currentSale) {
             return res.status(404).json({ error: 'Order not found' });
+        }
+        if (req.user.role !== 'admin') {
+            const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
+                where: { userId: req.user.id }
+            });
+            if (!retailerProfile || currentSale.retailerId !== retailerProfile.id) {
+                return res.status(404).json({ error: 'Order not found' });
+            }
         }
         // Can only cancel pending or confirmed orders
         if (!['pending', 'confirmed', 'processing'].includes(currentSale.status)) {
@@ -1286,15 +1290,17 @@ exports.cancelSale = cancelSale;
 const fulfillSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
-            where: { userId: req.user.id }
-        });
-        if (!retailerProfile) {
-            return res.status(404).json({ error: 'Retailer profile not found' });
-        }
         const currentSale = yield prisma_1.default.sale.findUnique({ where: { id: Number(id) } });
-        if (!currentSale || currentSale.retailerId !== retailerProfile.id) {
+        if (!currentSale) {
             return res.status(404).json({ error: 'Order not found' });
+        }
+        if (req.user.role !== 'admin') {
+            const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
+                where: { userId: req.user.id }
+            });
+            if (!retailerProfile || currentSale.retailerId !== retailerProfile.id) {
+                return res.status(404).json({ error: 'Order not found' });
+            }
         }
         // Can only fulfill ready orders
         if (!['ready', 'confirmed', 'processing'].includes(currentSale.status)) {

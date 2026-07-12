@@ -751,12 +751,21 @@ const getMyOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         });
         const retailerIds = Array.from(new Set(sales.map(s => s.retailerId)));
         const retailers = yield prisma_1.default.retailerProfile.findMany({
-            where: { id: { in: retailerIds } },
-            include: {
-                user: { select: { phone: true } }
-            }
+            where: { id: { in: retailerIds } }
         });
-        const retailerMap = new Map(retailers.map(r => [r.id, r]));
+        const userIds = retailers.map(r => r.userId);
+        const users = yield prisma_1.default.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, phone: true }
+        });
+        const userMap = new Map(users.map(u => [u.id, u]));
+        const retailerMap = new Map(retailers.map(r => {
+            var _a;
+            return [
+                r.id,
+                Object.assign(Object.assign({}, r), { phone: ((_a = userMap.get(r.userId)) === null || _a === void 0 ? void 0 : _a.phone) || 'N/A' })
+            ];
+        }));
         // 2. Fetch CustomerOrders (Gas/Other)
         const otherOrders = yield prisma_1.default.customerOrder.findMany({
             where: { consumerId: consumerProfile.id },
@@ -764,7 +773,6 @@ const getMyOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         });
         // 3. Normalize Sales to Order Interface
         const normalizedSales = sales.map(sale => {
-            var _a;
             const retailerProfile = retailerMap.get(sale.retailerId);
             return {
                 id: sale.id,
@@ -774,7 +782,7 @@ const getMyOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     id: sale.retailerId,
                     name: (retailerProfile === null || retailerProfile === void 0 ? void 0 : retailerProfile.shopName) || 'Unknown Retailer',
                     location: (retailerProfile === null || retailerProfile === void 0 ? void 0 : retailerProfile.address) || 'Unknown Location',
-                    phone: ((_a = retailerProfile === null || retailerProfile === void 0 ? void 0 : retailerProfile.user) === null || _a === void 0 ? void 0 : _a.phone) || 'N/A'
+                    phone: (retailerProfile === null || retailerProfile === void 0 ? void 0 : retailerProfile.phone) || 'N/A'
                 },
                 items: sale.saleItems.map(item => ({
                     id: item.id,

@@ -104,6 +104,18 @@ router.get('/employees/:id/account-details', adminController_1.getWorkerAccountD
 // Wholesaler account details (READ-ONLY for Admin)
 router.get('/wholesalers/:id/account-details', adminController_1.getWholesalerAccountDetails);
 // ==========================================
+// ADMIN PROXY — WHOLESALER ORDER ACTIONS (Admin acts on behalf of wholesaler)
+// ==========================================
+router.post('/wholesalers/:wId/orders/:orderId/confirm', adminController_1.adminConfirmWholesalerOrder);
+router.post('/wholesalers/:wId/orders/:orderId/reject', adminController_1.adminRejectWholesalerOrder);
+router.post('/wholesalers/:wId/orders/:orderId/ship', adminController_1.adminShipWholesalerOrder);
+// ==========================================
+// ADMIN PROXY — WHOLESALER INVENTORY ACTIONS
+// ==========================================
+router.put('/wholesalers/:wId/inventory/:productId', adminController_1.adminUpdateWholesalerProduct);
+router.post('/wholesalers/:wId/inventory/:productId/stock', adminController_1.adminUpdateWholesalerStock);
+router.delete('/wholesalers/:wId/inventory/:productId', adminController_1.adminDeleteWholesalerProduct);
+// ==========================================
 // WHOLESALER-RETAILER LINKAGE ROUTES
 // ==========================================
 router.get('/linkage', adminController_1.getRetailerWholesalerLinkage);
