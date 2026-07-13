@@ -8,7 +8,7 @@ export const getGasConfig = async (req: AuthRequest, res: Response) => {
     try {
         // Fetch live config from DB, fallback to env/default if not found
         const config = await prisma.systemConfig.findFirst();
-        const gasPrice = config?.gasPricePerM3 || Number(process.env.GAS_PRICE_PER_M3) || 1500;
+        const gasPrice = config?.gasPricePerM3 || Number(process.env.GAS_PRICE_PER_M3) || 3250;
         
         res.json({
             success: true,
@@ -268,7 +268,7 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
 
         // Calculate units based on system-wide dynamic rate from database
         const config = await prisma.systemConfig.findFirst();
-        const gasPrice = config?.gasPricePerM3 || Number(process.env.GAS_PRICE_PER_M3) || 1500;
+        const gasPrice = config?.gasPricePerM3 || Number(process.env.GAS_PRICE_PER_M3) || 3250;
         const units = Number((amount / gasPrice).toFixed(4)); // Ensure clean precision
 
         const result = await prisma.$transaction(async (tx) => {
