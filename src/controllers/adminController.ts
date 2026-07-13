@@ -45,7 +45,10 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     // 2. Orders & Revenue (Combine B2C Sales and B2B Wholesaler Orders)
     const [sales, wholesaleOrders] = await Promise.all([
       prisma.sale.findMany({
-        where: lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {}
+        where: {
+          ...(lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {}),
+          saleItems: { some: {} }
+        }
       }),
       prisma.order.findMany({
         where: lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {}
@@ -127,13 +130,16 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     const wholesalerActive = await prisma.wholesalerProfile.count({ where: { user: { isActive: true } } });
 
     // 8. System-wide Wallets (Consumer dashboard & Retailer capital wallets)
-    const consumerWalletSum = await prisma.consumerProfile.aggregate({ _sum: { walletBalance: true } });
+    const consumerWalletSum = await prisma.wallet.aggregate({
+      where: { type: 'dashboard_wallet' },
+      _sum: { balance: true }
+    });
     const secondaryWalletsSum = await prisma.wallet.aggregate({
       where: { type: 'capital' },
       _sum: { balance: true }
     });
     const totalWalletBalance = Math.round(
-      (consumerWalletSum._sum.walletBalance || 0) +
+      (consumerWalletSum._sum.balance || 0) +
       (secondaryWalletsSum._sum.balance || 0)
     );
 
@@ -149,8 +155,11 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
         if (p.retailerId !== null) {
           return sum + (p.stock * (p.costPrice || 0));
         }
-        const cost = p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0);
-        return sum + (p.stock * cost);
+        if (p.wholesalerId !== null) {
+          const cost = p.supplierCost !== null && p.supplierCost !== undefined && p.supplierCost > 0 ? p.supplierCost : (p.costPrice || 0);
+          return sum + (p.stock * cost);
+        }
+        return sum;
       }, 0)
     );
 
@@ -283,7 +292,12 @@ export const getReports = async (req: AuthRequest, res: Response) => {
 
     // 1. Stats based on date range
     const [sales, wholesaleOrders, gasTopups] = await Promise.all([
-      prisma.sale.findMany({ where: { createdAt: { gte: startDate } } }),
+      prisma.sale.findMany({ 
+        where: { 
+          createdAt: { gte: startDate },
+          saleItems: { some: {} }
+        } 
+      }),
       prisma.order.findMany({ where: { createdAt: { gte: startDate } } }),
       prisma.gasTopup.findMany({ where: { createdAt: { gte: startDate }, status: { in: ['completed', 'success'] } } })
     ]);
@@ -330,7 +344,8 @@ export const getReports = async (req: AuthRequest, res: Response) => {
           createdAt: {
             gte: prevPeriodStart,
             lt: startDate
-          }
+          },
+          saleItems: { some: {} }
         }
       }),
       prisma.order.findMany({
