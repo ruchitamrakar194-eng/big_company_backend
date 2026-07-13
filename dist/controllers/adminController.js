@@ -58,6 +58,7 @@ const email_validator_1 = require("../utils/email-validator");
 const pricingUtils_1 = require("../utils/pricingUtils");
 // Get detailed dashboard stats.
 const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const now = new Date();
         const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -86,10 +87,26 @@ const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         // 2. Orders & Revenue (Combine B2C Sales and B2B Wholesaler Orders)
         const [sales, wholesaleOrders] = yield Promise.all([
             prisma_1.default.sale.findMany({
-                where: Object.assign(Object.assign({}, (lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {})), { saleItems: { some: {} } })
+                where: Object.assign(Object.assign({}, (lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {})), { saleItems: { some: {} }, NOT: {
+                        saleItems: {
+                            some: {
+                                product: { category: { in: ['Gas', 'gas', 'GAS'] } }
+                            }
+                        }
+                    } }),
+                include: { saleItems: true }
             }),
             prisma_1.default.order.findMany({
-                where: lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {}
+                where: {
+                    NOT: {
+                        orderItems: {
+                            some: {
+                                product: { category: { in: ['Gas', 'gas', 'GAS'] } }
+                            }
+                        }
+                    }
+                },
+                include: { wholesalerProfile: true }
             })
         ]);
         const orderTotal = sales.length + wholesaleOrders.length;
@@ -97,8 +114,21 @@ const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const orderProcessing = sales.filter(s => s.status === 'processing').length + wholesaleOrders.filter(o => o.status === 'processing').length;
         const orderDelivered = sales.filter(s => s.status === 'completed' || s.status === 'delivered').length + wholesaleOrders.filter(o => o.status === 'delivered').length;
         const orderCancelled = sales.filter(s => s.status === 'cancelled').length + wholesaleOrders.filter(o => o.status === 'cancelled').length;
-        const salesRevenue = sales.filter(s => s.status === 'completed' || s.status === 'delivered').reduce((acc, s) => acc + s.totalAmount, 0);
-        const wholesaleRevenue = wholesaleOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.totalAmount, 0);
+        let salesRevenue = 0;
+        for (const sale of sales) {
+            if (sale.status === 'completed' || sale.status === 'delivered') {
+                salesRevenue += sale.saleItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+            }
+        }
+        let wholesaleRevenue = 0;
+        for (const order of wholesaleOrders) {
+            if (order.status === 'delivered') {
+                const settlementDate = (_a = order.wholesalerProfile) === null || _a === void 0 ? void 0 : _a.lastSettlementDate;
+                if (!settlementDate || order.createdAt >= settlementDate) {
+                    wholesaleRevenue += order.totalAmount;
+                }
+            }
+        }
         const totalRevenue = Math.round(salesRevenue + wholesaleRevenue);
         // Only count active/real orders (exclude cancelled) for today's orders
         const todayOrders = sales.filter(s => s.createdAt >= todayStart && s.status !== 'cancelled').length + wholesaleOrders.filter(o => o.createdAt >= todayStart && o.status !== 'cancelled').length;
@@ -182,6 +212,7 @@ const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             prisma_1.default.sale.findMany({
                 take: 5,
                 orderBy: { createdAt: 'desc' },
+                where: { saleItems: { some: {} } },
                 include: {
                     consumerProfile: { select: { fullName: true } }
                 }
@@ -408,7 +439,10 @@ const getReports = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const retailers = yield prisma_1.default.retailerProfile.findMany({
             include: {
                 sales: {
-                    where: { status: { in: ['completed', 'delivered'] } }
+                    where: {
+                        status: { in: ['completed', 'delivered'] },
+                        saleItems: { some: {} }
+                    }
                 }
             }
         });

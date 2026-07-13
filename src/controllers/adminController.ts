@@ -165,13 +165,12 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
       where: { type: 'dashboard_wallet' },
       _sum: { balance: true }
     });
-    const secondaryWalletsSum = await prisma.wallet.aggregate({
-      where: { type: 'capital' },
-      _sum: { balance: true }
+    const retailerCapitalSum = await prisma.retailerProfile.aggregate({
+      _sum: { walletBalance: true }
     });
     const totalWalletBalance = Math.round(
       (consumerWalletSum._sum.balance || 0) +
-      (secondaryWalletsSum._sum.balance || 0)
+      (retailerCapitalSum._sum.walletBalance || 0)
     );
 
     // 9. System-wide Rewards (Sum of all historically distributed gas rewards)
