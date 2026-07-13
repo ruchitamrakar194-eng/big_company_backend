@@ -55,7 +55,8 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
               }
             }
           }
-        }
+        },
+        include: { saleItems: true }
       }),
       prisma.order.findMany({
         where: {
@@ -66,7 +67,8 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
               }
             }
           }
-        }
+        },
+        include: { wholesalerProfile: true }
       })
     ]);
 
@@ -76,8 +78,22 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
     const orderDelivered = sales.filter(s => s.status === 'completed' || s.status === 'delivered').length + wholesaleOrders.filter(o => o.status === 'delivered').length;
     const orderCancelled = sales.filter(s => s.status === 'cancelled').length + wholesaleOrders.filter(o => o.status === 'cancelled').length;
 
-    const salesRevenue = sales.filter(s => s.status === 'completed' || s.status === 'delivered').reduce((acc, s) => acc + s.totalAmount, 0);
-    const wholesaleRevenue = wholesaleOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.totalAmount, 0);
+    let salesRevenue = 0;
+    for (const sale of sales) {
+      if (sale.status === 'completed' || sale.status === 'delivered') {
+        salesRevenue += sale.saleItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+      }
+    }
+
+    let wholesaleRevenue = 0;
+    for (const order of wholesaleOrders) {
+      if (order.status === 'delivered') {
+        const settlementDate = (order.wholesalerProfile as any)?.lastSettlementDate;
+        if (!settlementDate || order.createdAt >= settlementDate) {
+          wholesaleRevenue += order.totalAmount;
+        }
+      }
+    }
     const totalRevenue = Math.round(salesRevenue + wholesaleRevenue);
 
     // Only count active/real orders (exclude cancelled) for today's orders
