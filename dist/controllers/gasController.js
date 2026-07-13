@@ -53,7 +53,7 @@ const getGasConfig = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     try {
         // Fetch live config from DB, fallback to env/default if not found
         const config = yield prisma_1.default.systemConfig.findFirst();
-        const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || Number(process.env.GAS_PRICE_PER_M3) || 1500;
+        const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || Number(process.env.GAS_PRICE_PER_M3) || 3250;
         res.json({
             success: true,
             data: {
@@ -288,7 +288,7 @@ const topupGas = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         }
         // Calculate units based on system-wide dynamic rate from database
         const config = yield prisma_1.default.systemConfig.findFirst();
-        const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || Number(process.env.GAS_PRICE_PER_M3) || 1500;
+        const gasPrice = (config === null || config === void 0 ? void 0 : config.gasPricePerM3) || Number(process.env.GAS_PRICE_PER_M3) || 3250;
         const units = Number((amount / gasPrice).toFixed(4)); // Ensure clean precision
         const result = yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
             var _a;

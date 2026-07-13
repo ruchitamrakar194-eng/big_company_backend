@@ -168,6 +168,7 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
       prisma.sale.findMany({
         take: 5,
         orderBy: { createdAt: 'desc' },
+        where: { saleItems: { some: {} } },
         include: {
           consumerProfile: { select: { fullName: true } }
         }
@@ -401,7 +402,10 @@ export const getReports = async (req: AuthRequest, res: Response) => {
     const retailers = await prisma.retailerProfile.findMany({
       include: {
         sales: {
-          where: { status: { in: ['completed', 'delivered'] } }
+          where: { 
+            status: { in: ['completed', 'delivered'] },
+            saleItems: { some: {} }
+          }
         }
       }
     });
