@@ -47,11 +47,26 @@ export const getDashboard = async (req: AuthRequest, res: Response) => {
       prisma.sale.findMany({
         where: {
           ...(lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {}),
-          saleItems: { some: {} }
+          saleItems: { some: {} },
+          NOT: {
+            saleItems: {
+              some: {
+                product: { category: { in: ['Gas', 'gas', 'GAS'] } }
+              }
+            }
+          }
         }
       }),
       prisma.order.findMany({
-        where: lastProfitResetDate ? { createdAt: { gte: lastProfitResetDate } } : {}
+        where: {
+          NOT: {
+            orderItems: {
+              some: {
+                product: { category: { in: ['Gas', 'gas', 'GAS'] } }
+              }
+            }
+          }
+        }
       })
     ]);
 
