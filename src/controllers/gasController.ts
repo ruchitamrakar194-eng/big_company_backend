@@ -219,10 +219,14 @@ export const removeGasMeter = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ success: false, error: 'Gas meter not found' });
         }
 
-        // Soft delete
-        await prisma.gasMeter.update({
-            where: { id: Number(id) },
-            data: { status: 'removed' }
+        // Hard delete
+        // We delete related topups first to avoid foreign key constraints
+        await prisma.gasTopup.deleteMany({
+            where: { meterId: Number(id) }
+        });
+
+        await prisma.gasMeter.delete({
+            where: { id: Number(id) }
         });
 
         res.json({
