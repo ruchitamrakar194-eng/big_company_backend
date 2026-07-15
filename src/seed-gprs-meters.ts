@@ -14,7 +14,12 @@ async function main() {
   for (const item of gprsMapping) {
     try {
       const result = await prisma.gasMeter.upsert({
-        where: { meterNumber: item.meterNo },
+        where: { 
+          consumerId_meterNumber: {
+            consumerId: defaultConsumerId,
+            meterNumber: item.meterNo
+          }
+        },
         update: {
           imei: item.imei,
           serialNo: item.serialNo,

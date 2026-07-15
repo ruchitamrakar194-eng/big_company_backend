@@ -298,13 +298,9 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
     const retailerMarkupPct = (config as any)?.retailerMarkup || 20;
 
     const productsWithMargin = myProducts.map(p => {
-      let margin = retailerMarkupPct;
-      if (p.costPrice && p.price && p.costPrice > 0) {
-        margin = ((p.price - p.costPrice) / p.costPrice) * 100;
-      }
       return {
         ...p,
-        profitMargin: margin
+        profitMargin: retailerMarkupPct
       };
     });
 
