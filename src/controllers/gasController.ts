@@ -154,9 +154,12 @@ export const addGasMeter = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ success: false, error: 'Customer profile not found' });
         }
 
-        // Check if meter already exists
-        const existingMeter = await prisma.gasMeter.findUnique({
-            where: { meterNumber: meter_number }
+        // Check if meter already exists for this consumer
+        const existingMeter = await prisma.gasMeter.findFirst({
+            where: { 
+                meterNumber: meter_number,
+                consumerId: consumerProfile.id 
+            }
         });
 
         if (existingMeter) {

@@ -500,7 +500,7 @@ model EmployeeProfile {
 model GasMeter {
   id              Int             @id @default(autoincrement())
   consumerId      Int
-  meterNumber     String          @unique(map: "GasMeter_meterNumber_key")
+  meterNumber     String
   meterKey        String?         // METER_KEY (16-char hex devEui) used by Energyy GPRS API
   imei            String?         // Store the mapping to IMEI for GPRS remote push
   isGprs          Boolean         @default(false)
@@ -516,6 +516,7 @@ model GasMeter {
   consumerProfile ConsumerProfile @relation(fields: [consumerId], references: [id], onDelete: NoAction, map: "GasMeter_consumerId_fkey")
   gasTopups       GasTopup[]
 
+  @@unique([consumerId, meterNumber])
   @@index([consumerId], map: "GasMeter_consumerId_fkey")
   @@map("gasmeter")
 }
