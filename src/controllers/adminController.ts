@@ -3305,7 +3305,10 @@ export const getRetailerAccountDetails = async (req: AuthRequest, res: Response)
           lowStock: retailer.inventory.filter(p => p.lowStockThreshold && p.stock <= p.lowStockThreshold).length,
           outOfStock: retailer.inventory.filter(p => p.stock === 0).length
         },
-        products: retailer.inventory,
+        products: retailer.inventory.map(p => ({
+          ...p,
+          profitMargin: retailerMarkup
+        })),
         creditRequests: retailer.creditRequests,
         lastOrder,
         linkedWholesaler: retailer.linkedWholesaler ? {
