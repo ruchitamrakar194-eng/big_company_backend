@@ -3005,6 +3005,7 @@ export const getCustomerAccountDetails = async (req: AuthRequest, res: Response)
     const totalGasRewardsSum = await prisma.gasReward.aggregate({
       where: {
         consumerId: customer.id,
+        units: { gt: 0 },
         ...(lastGasResetDate ? { createdAt: { gte: lastGasResetDate } } : {})
       },
       _sum: { units: true }
