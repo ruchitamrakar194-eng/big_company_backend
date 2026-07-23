@@ -462,7 +462,8 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
                     meter_id: meter_number,
                     amount: amount.toLocaleString(),
                     token: token,
-                    transaction_id: order.id.toString()
+                    transaction_id: order.id.toString(),
+                    volume: units
                 },
                 relatedEntity: { type: 'GAS_ORDER', id: order.id.toString() }
             });
@@ -478,7 +479,8 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
                         meter_id: meter_number,
                         amount: amount.toLocaleString(),
                         token: token,
-                        transaction_id: order.id.toString()
+                        transaction_id: order.id.toString(),
+                        volume: units
                     },
                     relatedEntity: { type: 'GAS_ORDER', id: order.id.toString() }
                 });

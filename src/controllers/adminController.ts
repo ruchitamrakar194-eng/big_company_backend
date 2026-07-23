@@ -4300,11 +4300,40 @@ export const getEmailTemplates = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Create or Update an email template
+ * Create or Update an email template with validation
  */
 export const saveEmailTemplate = async (req: AuthRequest, res: Response) => {
   try {
     const { name, subject, content, description, isActive, portal, triggerName, channel } = req.body;
+
+    const SUPPORTED_VARIABLES = [
+      'Customer_name', 'customer_name', 'name', 'retail_name', 'wholesaler_name',
+      'meter_name', 'meter_id', 'amount', 'volume', 'token', 'transaction_id',
+      'tempPass', 'role', 'email', 'productName', 'currentStock', 'threshold',
+      'type', 'balance', 'txRef', 'orderNumber', 'quantity', 'totalAmount',
+      'temp_password', 'attempt_time', 'date', 'month', 'salesCount', 'revenue',
+      'newRetailers', 'newWholesalers', 'lowStockCount', 'offlineMeters', 'period',
+      'action', 'reason'
+    ];
+
+    // Validate variables in both subject and content
+    const textToValidate = `${subject || ''} ${content || ''}`;
+    const variableRegex = /{{(.*?)}}/g;
+    const invalidVariables = [];
+    let match;
+    while ((match = variableRegex.exec(textToValidate)) !== null) {
+      const varName = match[1].trim();
+      if (!SUPPORTED_VARIABLES.includes(varName)) {
+        invalidVariables.push(varName);
+      }
+    }
+
+    if (invalidVariables.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid or unsupported variable(s): ${invalidVariables.map(v => `{{${v}}}`).join(', ')}. Please use only valid system variables.`
+      });
+    }
 
     // @ts-ignore
     const template = await prisma.emailTemplate.upsert({
@@ -4325,6 +4354,105 @@ export const saveEmailTemplate = async (req: AuthRequest, res: Response) => {
     }
 
     res.json({ success: true, template, message: 'Template saved successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Preview email or SMS template with mockup data
+ */
+export const previewEmailTemplate = async (req: AuthRequest, res: Response) => {
+  try {
+    const { subject, content, channel } = req.body;
+
+    const mockData = {
+      Customer_name: 'Kayitare',
+      customer_name: 'Kayitare',
+      name: 'Kayitare',
+      retail_name: 'Apex Retailer',
+      wholesaler_name: 'Apex Wholesaler',
+      meter_name: 'Tekana Gas Meter',
+      meter_id: '2510170000331',
+      amount: '650',
+      volume: '0.1',
+      token: '67444670080112715377',
+      transaction_id: '170',
+      tempPass: 'tempPass123',
+      role: 'retailer',
+      email: 'customer@gmail.com',
+      productName: 'Cooking Gas Regulator',
+      currentStock: '5',
+      threshold: '10',
+      type: 'LOW_BALANCE',
+      balance: '1200',
+      txRef: 'REF-8273648',
+      orderNumber: 'ORD-9923',
+      quantity: '3',
+      totalAmount: '9750',
+      temp_password: 'ResetTempPass123',
+      attempt_time: new Date().toLocaleString(),
+      date: new Date().toLocaleDateString(),
+      month: 'July',
+      salesCount: 42,
+      revenue: 136500,
+      newRetailers: 4,
+      newWholesalers: 1,
+      lowStockCount: 2,
+      offlineMeters: 0,
+      period: 'Today',
+      action: 'SUSPENDED',
+      reason: 'Policy Violation'
+    };
+
+    const render = (template: string, data: Record<string, any>): string => {
+      let rendered = template;
+      Object.keys(data).forEach(key => {
+        const value = data[key];
+        const regex = new RegExp(`{{${key}}}`, 'g');
+        rendered = rendered.replace(regex, value !== undefined && value !== null ? String(value) : '');
+      });
+      return rendered;
+    };
+
+    const renderedSubject = render(subject || '', mockData);
+    let renderedContent = render(content || '', mockData);
+
+    const isSMS = channel === 'SMS';
+    if (!isSMS) {
+      renderedContent = TemplateService.wrap(renderedContent);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        subject: renderedSubject,
+        content: renderedContent,
+        isSMS
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Get all supported variables for email/SMS templates
+ */
+export const getTemplateVariables = async (req: AuthRequest, res: Response) => {
+  try {
+    res.json({
+      success: true,
+      variables: [
+        'Customer_name', 'customer_name', 'name', 'retail_name', 'wholesaler_name',
+        'meter_name', 'meter_id', 'amount', 'volume', 'token', 'transaction_id',
+        'tempPass', 'role', 'email', 'productName', 'currentStock', 'threshold',
+        'type', 'balance', 'txRef', 'orderNumber', 'quantity', 'totalAmount',
+        'temp_password', 'attempt_time', 'date', 'month', 'salesCount', 'revenue',
+        'newRetailers', 'newWholesalers', 'lowStockCount', 'offlineMeters', 'period',
+        'action', 'reason'
+      ]
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

@@ -75,6 +75,8 @@ import {
   getEmailTemplates,
   saveEmailTemplate,
   deleteEmailTemplate,
+  previewEmailTemplate,
+  getTemplateVariables,
   sendManualEmail,
   getEmailEvents,
   updateEmailEvent,
@@ -260,6 +262,8 @@ router.post('/email-logs/:id/resend', resendEmail);
 // Email Template Routes
 router.get('/email-templates', getEmailTemplates);
 router.post('/email-templates', saveEmailTemplate);
+router.post('/email-templates/preview', previewEmailTemplate);
+router.get('/email-templates/variables', getTemplateVariables);
 router.delete('/email-templates/:id', deleteEmailTemplate);
 
 // Manual Email Sending
